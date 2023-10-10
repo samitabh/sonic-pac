@@ -21,7 +21,6 @@
 #include <iostream>
 #include "hostapdmgr.h"
 #include <unistd.h>
-#include "ebpf/libebpf.h"
 
 int main(int argc, char *argv[])
 {
@@ -31,8 +30,6 @@ int main(int argc, char *argv[])
   swss::DBConnector log_db(LOGLEVEL_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
   HostapdMgr hostapd(&configDb, &appDb);
 
-  DebugShCmdHandler dbg_hdlr(&log_db, "HOSTAPDMGRD");
-
   try
   {
     SWSS_LOG_NOTICE("-----Starting HostapdMgr-----");
@@ -40,15 +37,11 @@ int main(int argc, char *argv[])
     //register for the table events
     swss::Select s;
     s.addSelectables(hostapd.getSelectables());
-    s.addSelectables(dbg_hdlr.getSelectables());
 
     //register for the table events
     NetLink netlink;
     netlink.registerGroup(RTNLGRP_LINK);
     netlink.dumpRequest(RTM_GETLINK);
-    netlink.setDumpIntrErrorCallback(hostapdHandleDumpError, &netlink);
-    attach_ebpf_filter(netlink.getFd(), "/lib/ebpf/pac_filter.bpf");
-    SWSS_LOG_DEBUG("Attaching pac ebpf filter");
 
     // kill any stale hostapd
     hostapd.killHostapd();
@@ -107,11 +100,7 @@ int main(int argc, char *argv[])
 
       ret = s.select(&sel);
 
-      if (dbg_hdlr.isDebugSelectable(sel))
-      {
-          dbg_hdlr.process(sel);
-      }
-      else if (sel != &netlink)
+      if (sel != &netlink)
       {
         //Pass on the processing to the Hostapd Manager
         hostapd.processDbEvent(sel);
@@ -126,10 +115,3 @@ int main(int argc, char *argv[])
   return -1;
 }
 
-void hostapdHandleDumpError(void *cbData)
-{
-    SWSS_LOG_ENTER();
-    NetLink *netlink = (NetLink *)cbData;
-    SWSS_LOG_NOTICE("Netlink dump failed with NLE_DUMP_INTR, resending dump request");
-    netlink->dumpRequest(RTM_GETLINK);
-}

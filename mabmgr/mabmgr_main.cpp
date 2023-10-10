@@ -28,13 +28,13 @@ int main(int argc, char *argv[])
     cout<<"Invoking fpinfraInit" << endl;
     fpinfraInit();
 
-    if (mabInit () != L7_SUCCESS)
+    if (mabInit () !=  SUCCESS)
       cout<<"Fail" << endl;
     else
       cout<<"Success linked" << endl;
 
-    if (osapiWaitForTaskInit (L7_MAB_DB_TASK_SYNC, L7_WAIT_FOREVER) !=
-                              L7_SUCCESS)
+    if (osapiWaitForTaskInit ( MAB_DB_TASK_SYNC,  WAIT_FOREVER) !=
+                               SUCCESS)
     {
       return -1;
     }
@@ -54,10 +54,8 @@ int main(int argc, char *argv[])
         swss::DBConnector stateDb("STATE_DB", 0);
         swss::DBConnector configDb("CONFIG_DB", 0);
         swss::DBConnector appDb("APPL_DB", 0);
-        swss::DBConnector log_db(LOGLEVEL_DB, DBConnector::DEFAULT_UNIXSOCKET, 0);
 
         MabMgr mab(&configDb, &stateDb, &appDb);
-        DebugShCmdHandler dbg_hdlr(&log_db, "MABMGRD");
 
         // App Marking closest UP status
         Table feat_tbl(&stateDb, STATE_FEATURE_TABLE_NAME);
@@ -80,7 +78,6 @@ int main(int argc, char *argv[])
 	//register for the table events
         swss::Select s;
         s.addSelectables(mab.getSelectables());
-        s.addSelectables(dbg_hdlr.getSelectables());
 
         //wait for the events and process them
         while (true)
@@ -90,15 +87,8 @@ int main(int argc, char *argv[])
             swss::Selectable *sel = NULL;
             s.select(&sel);
 
-            if (dbg_hdlr.isDebugSelectable(sel))
-            {
-                dbg_hdlr.process(sel);
-            }
-            else
-            {
-                //Pass on the processing to the Mab Manager
-                mab.processDbEvent(sel);
-            }
+            //Pass on the processing to the Mab Manager
+            mab.processDbEvent(sel);
         }
 
     }

@@ -34,49 +34,17 @@
 #include "tokenize.h"
 
 #define TEAM_DRV_NAME   "team"
-#define HOSTAPD_CMD_BUFFSZ  2048
 
-const string MGMT_PREFIX = "eth";
 const string INTFS_PREFIX = "E";
-const string LAG_PREFIX = "PortChannel";
-
 const string HOSTAPD_PID_FILE = "/etc/hostapd/hostapdPid";
-const string HOSTAPD_SERVER_TIMEOUT = "serverTimeout";
-const string HOSTAPD_QUIET_PERIOD = "quietPeriod";
 
 HostapdMgr *hostapd;
-
-DEBUGSH_CLI(HostapdMgrRadiusStats,
-            "show system internal hostapdmgr radius-stats ETHERNETNAME",
-            SHOW_COMMAND,
-            SYSTEM_DEBUG_COMMAND,
-            INTERNAL_COMMAND,
-            "HostapdMgr related commands",
-            "Radius stats",
-            "Interface")
-{
-    string intf = "";
-
-    if (args.size() == 0)
-    {
-        return;
-    }
-
-    intf = args[0];
-
-    hostapd->showDebugInfo(this, intf);
-}
 
 HostapdMgr::HostapdMgr(DBConnector *configDb, DBConnector *appDb) :
                            m_confHostapdPortTbl(configDb, CFG_PAC_PORT_CONFIG_TABLE),
                            m_confHostapdGlobalTbl(configDb, CFG_PAC_HOSTAPD_GLOBAL_CONFIG_TABLE),
                            m_confRadiusServerTable(configDb, "RADIUS_SERVER"),
-                           m_confRadiusGlobalTable(configDb, "RADIUS"),
-                           m_mgmtIntfTbl(appDb, "MGMT_INTF_TABLE"),
-                           m_IntfTbl(configDb, CFG_INTF_TABLE_NAME),
-                           m_VlanIntfTbl(configDb, CFG_VLAN_INTF_TABLE_NAME),
-                           m_LoIntfTbl(configDb, CFG_LOOPBACK_INTERFACE_TABLE_NAME),
-                           m_PoIntfTbl(configDb, CFG_LAG_INTF_TABLE_NAME)
+                           m_confRadiusGlobalTable(configDb, "RADIUS")
 
 {
   Logger::linkToDbNative("hostapdmgr");
@@ -86,41 +54,6 @@ HostapdMgr::HostapdMgr(DBConnector *configDb, DBConnector *appDb) :
   stop_hostapd = false;
 
   hostapd = this;
-  SWSS_LOG_DEBUG("Installing HostapdMgr commands");
-  DebugShCmd::install(new HostapdMgrRadiusStats());
-}
-
-void HostapdMgr::showDebugInfo(DebugShCmd *cmd, string intf)
-{
-    string cmdstr = "hostapd_cli -i " + intf + " mib";
-    array<char, HOSTAPD_CMD_BUFFSZ> buffer;
-    FILE* pipe = popen(cmdstr.c_str(), "r");
-    string output;
-
-    if (pipe) {
-
-        DEBUGSH_OUT(cmd, "Dumping Hostapdmgr radius stats\n\n");
-        DEBUGSH_OUT(cmd, "==============================================\n");
- 
-        while (!feof(pipe)) {
-            if (fgets(buffer.data(), HOSTAPD_CMD_BUFFSZ, pipe) != NULL) {
-                output.clear();
-                output += buffer.data();
-                 
-                DEBUGSH_OUT(cmd, "%s", output.c_str());
-            }
-        }
-
-        DEBUGSH_OUT(cmd, "\n==============================================\n\n");
-
-        if (0 != pclose(pipe)) {
-            DEBUGSH_OUT(cmd, "dot1x not enabled or HOSTAPD not running.\n");
-        }
-    }
-    else
-    {
-        DEBUGSH_OUT(cmd, "dot1x not enabled or HOSTAPD not running.\n");
-    }
 }
 
 string HostapdMgr::getStdIfFormat(string key)
@@ -135,8 +68,7 @@ string HostapdMgr::getStdIfFormat(string key)
 }
 
 vector<Selectable*> HostapdMgr::getSelectables() {
-    vector<Selectable *> selectables{ &m_confHostapdPortTbl, &m_confHostapdGlobalTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable, 
-                                      &m_mgmtIntfTbl, &m_IntfTbl, &m_VlanIntfTbl, &m_PoIntfTbl, &m_LoIntfTbl };
+    vector<Selectable *> selectables{ &m_confHostapdPortTbl, &m_confHostapdGlobalTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable};
     return selectables;
 }
 
@@ -161,17 +93,6 @@ bool HostapdMgr::processDbEvent(Selectable *tbl) {
 
     if (tbl == ((Selectable *) & m_confRadiusGlobalTable)) {
         return processRadiusGlobalTblEvent(tbl);
-    }
-
-    if (tbl == ((Selectable *) & m_mgmtIntfTbl)) {
-         return processMgmtIntfTblEvent(tbl);
-    }
-
-    if ((tbl == ((Selectable *) & m_IntfTbl)) ||
-        (tbl == ((Selectable *) & m_VlanIntfTbl)) ||        
-        (tbl == ((Selectable *) & m_LoIntfTbl)) ||        
-        (tbl == ((Selectable *) & m_PoIntfTbl))) {
-         return processIntfTblEvent(tbl);
     }
 
     SWSS_LOG_DEBUG("Received event UNKNOWN to HOSTAPD, ignoring ");
@@ -211,10 +132,6 @@ bool HostapdMgr::processHostapdConfigPortTblEvent(Selectable *tbl)
       hostapd_intf_info_t intf;
       intf.control_mode = "force-authorized";
       intf.capabilities = "none";
-      intf.quiet_period = PAC_QUIET_PERIOD_DEF;
-      intf.server_timeout = PAC_SERVER_TIMEOUT_DEF;
-      intf.server_timeout_modified = false;
-      intf.quiet_period_modified = false;
       intf.admin_status = 0;
       intf.link_status = 0;
       intf.config_created = false;
@@ -230,7 +147,8 @@ bool HostapdMgr::processHostapdConfigPortTblEvent(Selectable *tbl)
      {
        SWSS_LOG_NOTICE("m_radius_info.radius_auth_server_list.size() is non-zero ");
      }
-  	if (val == SET_COMMAND) 
+    
+    if (val == SET_COMMAND) 
     {
       vector<string> new_interfaces;
       vector<string> del_interfaces;
@@ -303,22 +221,11 @@ bool HostapdMgr::processHostapdConfigPortTblEvent(Selectable *tbl)
           }
           m_intf_info[key].control_mode = b;
         }
-        else if ((a == "server_timeout") && (m_intf_info[key].server_timeout != (unsigned int)stoi(b))) 
-        {
-          m_intf_info[key].server_timeout = (unsigned int)stoi(b);
-          m_intf_info[key].server_timeout_modified = true;
-        }
-        else if ((a == "quiet_period") && (m_intf_info[key].quiet_period != (unsigned int)stoi(b)))
-        {
-           m_intf_info[key].quiet_period = (unsigned int)stoi(b);
-           m_intf_info[key].quiet_period_modified = true;
-        }
       }
 
       /* update JSON for new_interfaces and del_interfaces */
       informHostapd("new", new_interfaces);
       informHostapd("deleted", del_interfaces);
-      setPortDot1xTimeoutParams();
     }
     else if (val == DEL_COMMAND) 
     {
@@ -346,7 +253,8 @@ bool HostapdMgr::processHostapdConfigGlobalTblEvent(Selectable *tbl)
     return false;
   }
 
-              SWSS_LOG_NOTICE("enable_auth %d: ", m_glbl_info.enable_auth);
+  SWSS_LOG_NOTICE("enable_auth %d: ", m_glbl_info.enable_auth);
+
   // Check through all the data
   for (auto entry : entries) 
   {
@@ -397,8 +305,6 @@ bool HostapdMgr::processHostapdConfigGlobalTblEvent(Selectable *tbl)
               /* Update JSON */
 
               informHostapd("new", interfaces);
-              setPortDot1xTimeoutParams();
-
             }
           } 
           else if (b == "false")
@@ -538,8 +444,6 @@ void HostapdMgr::updateRadiusServer() {
            m_radiusServerInUseInfo.server_port = item.second.server_port;
            m_radiusServerInUseInfo.server_key = m_radius_info.m_radiusGlobalKey;
            m_radiusServerInUseInfo.server_priority = item.second.server_priority;
-           m_radiusServerInUseInfo.server_vrf = item.second.server_vrf;
-           m_radiusServerInUseInfo.server_source_intf = item.second.server_source_intf;
            if (item.second.server_key != "")
            { 
                m_radiusServerInUseInfo.server_key = item.second.server_key;
@@ -567,7 +471,6 @@ void HostapdMgr::updateRadiusServer() {
  
        /* update JSON file */
        informHostapd("modified", interfaces);
-       setPortDot1xTimeoutParams();
        return; 
    }
 
@@ -624,8 +527,6 @@ bool HostapdMgr::processRadiusServerTblEvent(Selectable *tbl) {
       m_radius_info.radius_auth_server_list[key].server_port = "";
       m_radius_info.radius_auth_server_list[key].server_key = "";
       m_radius_info.radius_auth_server_list[key].server_priority = "";
-      m_radius_info.radius_auth_server_list[key].server_vrf = "";
-      m_radius_info.radius_auth_server_list[key].server_source_intf = "";
 
       // Look at the data that is sent for this key
       for (auto i : kfvFieldsValues(entry)) 
@@ -654,14 +555,6 @@ bool HostapdMgr::processRadiusServerTblEvent(Selectable *tbl) {
         {
           m_radius_info.radius_auth_server_list[key].server_priority = b;
         }
-        else if (a == "vrf")
-        {
-          m_radius_info.radius_auth_server_list[key].server_vrf = b;
-        }
-        else if (a == "src_intf")
-        {
-          m_radius_info.radius_auth_server_list[key].server_source_intf = b;
-        }
       }
     }
     else if (val == DEL_COMMAND) 
@@ -684,7 +577,6 @@ bool HostapdMgr::processRadiusGlobalTblEvent(Selectable *tbl) {
   SWSS_LOG_ENTER();
   SWSS_LOG_NOTICE("Received a RADIUS table event");
   string key(m_radius_info.m_radiusGlobalKey);
-  string nas_ip(m_radius_info.nas_ip);
 
   deque<KeyOpFieldsValuesTuple> entries;
   m_confRadiusGlobalTable.pops(entries);
@@ -708,7 +600,6 @@ bool HostapdMgr::processRadiusGlobalTblEvent(Selectable *tbl) {
     // Incoming field values will not have passkey or nas_ip. Hence, we intiialize to NULL
     // so that incoming data will decide the final value.
     m_radius_info.m_radiusGlobalKey = "";
-    m_radius_info.nas_ip = "";
 
     SWSS_LOG_NOTICE("Received %s as key and %s as OP", key.c_str(), val.c_str());
 
@@ -734,10 +625,6 @@ bool HostapdMgr::processRadiusGlobalTblEvent(Selectable *tbl) {
           
           m_radius_info.m_radiusGlobalKey = ret._2;
         }
-        else if (a == "nas_ip")
-        {
-          m_radius_info.nas_ip = b;
-        }
       }
     }
     else if (val == DEL_COMMAND) 
@@ -745,126 +632,14 @@ bool HostapdMgr::processRadiusGlobalTblEvent(Selectable *tbl) {
       SWSS_LOG_WARN("DEL operation on RADIUS table");
 
       m_radius_info.m_radiusGlobalKey = "";
-      m_radius_info.nas_ip = "";
     }
   }
 
   // Since RADIUS config has been modified, deduce the new 
   // RADIUS server to be used and inform hostapd if required.
-  if ((m_radius_info.m_radiusGlobalKey != key) || (m_radius_info.nas_ip != nas_ip))
+  if (m_radius_info.m_radiusGlobalKey != key)
   {
     updateRadiusServer();
-  }
-
-  return true;
-}
-
-bool HostapdMgr::processMgmtIntfTblEvent(Selectable *tbl)
-{
-  std::deque<KeyOpFieldsValuesTuple> entries;
-  m_mgmtIntfTbl.pops(entries);
-  SWSS_LOG_NOTICE("Received %d entries from config event on MGMT_INTERFACE Table", (int) entries.size());
-
-  // Removal of MGMT IP also is sent as a SET
-  m_radius_info.mgmt_ip = "";
-  m_radius_info.mgmt_ipv6 = "";
-
-  for (auto entry : entries) 
-  {
-    std::string key = kfvKey(entry);
-    SWSS_LOG_NOTICE("key %s", key.c_str());
-
-    auto tokens = tokenize(key, ':');
-    SWSS_LOG_NOTICE("size %d", tokens.size());
-
-    // pick only IPv4 address of the management interface
-    if (2 == tokens.size())
-    {
-      // eth0:a.b.c.d/mask
-      auto tokens1 = tokenize(tokens[1], '/');
-      SWSS_LOG_NOTICE("Management IPv4 %s", tokens1[0].c_str());
-      m_radius_info.mgmt_ip = tokens1[0];
-    }
-    else if (tokens.size() > 2)
-    {
-      // eth0:2001::64/mask. Remove "eth0:"
-      string ipv6Str = key.substr(5);
-
-      auto tokens1 = tokenize(ipv6Str, '/');
-      SWSS_LOG_NOTICE("Management IPv6 %s", tokens1[0].c_str());
-      m_radius_info.mgmt_ipv6 = tokens1[0];
-    }
-  }
-
-  string mgmt_intf("eth0");
-
-  if ((0 == m_radius_info.nas_ip.size()) ||
-     (IsSourceIntf(mgmt_intf)))
-  {
-    SWSS_LOG_NOTICE("Interface %s address update.", mgmt_intf.c_str());
-    updateRadiusServer();
-  }
-
-  return true;
-}
-
-bool HostapdMgr::IsSourceIntf(const string interface)
-{
-  for (auto& item: m_radius_info.radius_auth_server_list)
-  {
-    if (item.second.server_source_intf == interface)
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool HostapdMgr::processIntfTblEvent(Selectable *tbl)
-{
-  std::deque<KeyOpFieldsValuesTuple> entries;
-
-  if (tbl == ((Selectable *) & m_IntfTbl))
-  {
-    m_IntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on INTERFACE Table", (int) entries.size());
-  }
-  else if (tbl == ((Selectable *) & m_VlanIntfTbl))
-  {
-    m_VlanIntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on VLAN_INTERFACE Table", (int) entries.size());
-  }
-  else if (tbl == ((Selectable *) & m_LoIntfTbl))
-  {
-    m_LoIntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on LOOPBACK_INTERFACE Table", (int) entries.size());
-  }
-  else if (tbl == ((Selectable *) & m_PoIntfTbl))
-  {
-    m_PoIntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on PORTCHANNEL_INTERFACE Table", (int) entries.size());
-  }
-
-  for (auto entry : entries) 
-  {
-    std::string key = kfvKey(entry);
-    SWSS_LOG_NOTICE("key %s", key.c_str());
-
-    auto key_tokens = tokenize(key, '|');
-    SWSS_LOG_NOTICE("size %d", key_tokens.size());
-
-    if (2 == key_tokens.size())
-    {
-      // Ethernet0|IPAddress
-      if (IsSourceIntf(key_tokens[0]))
-      {
-        auto ip_tokens = tokenize(key_tokens[1], '/');
-        SWSS_LOG_NOTICE("Interface %s used as Source Interface. Address %s/%s", 
-                        key_tokens[0].c_str(), ip_tokens[0].c_str(), ip_tokens[1].c_str());
-        updateRadiusServer();
-        break;
-      }
-    }
   }
 
   return true;
@@ -1006,7 +781,6 @@ void HostapdMgr::onMsg(int nlmsg_type, struct nl_object *obj)
         
         /* update JSON file */
         informHostapd("new", interfaces);
-        setPortDot1xTimeoutParams();
       }
       /* down't bring down hostapd interface when admin state goes down.
        * it will get deleted with RTM_DELLINK.
@@ -1034,42 +808,6 @@ void HostapdMgr::delPort(const string & alias)
 {
   SWSS_LOG_ENTER();
   m_intf_info.erase(alias);
-}
-
-void HostapdMgr::setPortDot1xTimeoutParams()
-{
-  SWSS_LOG_ENTER();
-  if (0 == active_intf_cnt)
-  {
-    return;
-  }
-
-  pid_t pid = getHostapdPid();
-
-  if (0 == pid)
-  {
-    return;
-  }
-  for (auto& item: m_intf_info)
-  {
-     if (true == item.second.config_created)
-     {
-        if ((true == item.second.server_timeout_modified) ||
-            (PAC_SERVER_TIMEOUT_DEF != item.second.server_timeout))
-        {
-           std::string s = std::to_string(item.second.server_timeout); 
-           hostapdDot1xWpaEventSend(item.first, HOSTAPD_SERVER_TIMEOUT, s);
-           item.second.server_timeout_modified = false;
-        } 
-        if ((true == item.second.quiet_period_modified) ||
-           (PAC_QUIET_PERIOD_DEF != item.second.quiet_period))
-        {
-           std::string s = std::to_string(item.second.quiet_period); 
-           hostapdDot1xWpaEventSend(item.first, HOSTAPD_QUIET_PERIOD, s);
-           item.second.quiet_period_modified = false;
-        }
-     }
-  }
 }
 
 static bool file_exists(const string& file_name) 
@@ -1368,33 +1106,6 @@ void HostapdMgr::createConfFile(const string& intf)
   content += "ctrl_interface=/var/run/hostapd\n";
   content += "use_pae_group_addr=0\n";
 
-  string nas_ip("");
-  string nas_id("");
-
-  if (m_radius_info.nas_ip.size())
-  {
-    nas_ip = m_radius_info.nas_ip;
-    nas_id = m_radius_info.nas_ip;
-  }
-  else if (m_radius_info.mgmt_ip.size())
-  {
-    nas_ip = m_radius_info.mgmt_ip;
-    nas_id = m_radius_info.mgmt_ip;
-  }
-  else if (m_radius_info.mgmt_ipv6.size())
-  {
-    nas_ip = m_radius_info.mgmt_ipv6;
-    nas_id = m_radius_info.mgmt_ipv6;
-  }
- 
-  if (nas_ip.size() && nas_id.size())
-  {
-    content += "own_ip_addr=";
-    content += (nas_ip + "\n");
-    content += "nas_identifier=";
-    content += (nas_id + "\n");
-  }
-
   vector<pair<string, radius_server_info_t>> auth_sortedMap;
   for (auto& item: m_radius_info.radius_auth_server_list) 
   {
@@ -1434,37 +1145,8 @@ void HostapdMgr::createConfFile(const string& intf)
        content += (item.second.server_key + "\n");
     }
 
-    if (item.second.server_vrf != "")
-    {
-      content += "auth_server_vrf="; 
-      content += (item.second.server_vrf + "\n");
-    }
-
-    if (item.second.server_source_intf != "")
-    {
-      content += "auth_server_source_interface="; 
-      content += (getHostIntfName(item.second.server_source_intf) + "\n");
-    }
-  }
-
-  vector<pair<string, radius_server_info_t>> sortedMap;
-  for (auto& item: m_radius_info.radius_acct_server_list) 
-  {
-    item.second.server_priority = (item.second.server_priority == "") ? 
-                                  "0": item.second.server_priority;
-    sortedMap.push_back(item);
-  }
-
-  for (auto const& item: sortedMap) 
-  {
-    content += "acct_server_addr="; 
-    content += (item.first + "\n");
-
-    content += "acct_server_port="; 
-    content += (item.second.server_port + "\n");
-
-    content += "acct_server_shared_secret=";
-    content += (item.second.server_key + "\n");
+    /* Write only the highest priroty server */
+    break;
   }
 
   SWSS_LOG_NOTICE("active intf count %d ", active_intf_cnt);
@@ -1625,69 +1307,3 @@ int HostapdMgr::waitForHostapdInit(pid_t hostapd_pid)
    return (pid == hostapd_pid)? 0 : -1;
 }
 
-void HostapdMgr::hostapdDot1xWpaEventSend(const string& interface, const string& event, string& val)
-{
-   size_t   len = 0;
-   char     buf[128] = {'\0'};
-   char     cmd[128] = {'\0'};
-   char     bcast_addr[] = "FF:FF:FF:FF:FF:FF";
-   string   intf = getHostIntfName(interface);
-
-   SWSS_LOG_DEBUG("Hostapd %s event %s  = %s ", intf.c_str(), event.c_str(), val.c_str());
-   snprintf(cmd, sizeof(cmd), "EAPOL_SET %s %s %s", bcast_addr, event.c_str(), val.c_str());
-
-   if (0 == hostapdWpaSyncSend(intf.c_str(), cmd, buf, &len))
-   {
-      if (0 == strncmp("OK", buf, strlen("OK"))) 
-      {
-         SWSS_LOG_INFO("Hostapd %s event %s  = %s set successfully.", intf.c_str(), event.c_str(), val.c_str());
-         return;
-      }
-   } 
-   SWSS_LOG_WARN("Hostapd %s event %s  = %s set failed.", intf.c_str(), event.c_str(), val.c_str());
-}
-
-int HostapdMgr::hostapdWpaSyncSend(const char *ctrl_ifname, const char * cmd, char *buf, size_t *len)
-{
-	static struct wpa_ctrl *ctrl_conn;
-	int  ret;
-	char sock_file[128];
-
-	memset(sock_file, 0, sizeof(sock_file));
-	sprintf(sock_file, "/var/run/hostapd/%s", ctrl_ifname);
-
-	ctrl_conn = wpa_ctrl_open(sock_file);
-	if (NULL == ctrl_conn)
-	{
-	  SWSS_LOG_NOTICE("Not connected to hostapd - command dropped.. retrying..");
-	  usleep(10 * 1000);
-
-	  ctrl_conn = wpa_ctrl_open(sock_file);
-
-	  if (NULL == ctrl_conn)
-	  {
-		SWSS_LOG_NOTICE("Not connected to hostapd - command dropped..\n");
-		return -1;
-	  }
-	}      
-      
-	*len = sizeof(buf) - 1;
-	ret = wpa_ctrl_request(ctrl_conn, cmd, strlen(cmd), buf, len, NULL);
-	if (ret == -2) 
-    {
-       SWSS_LOG_NOTICE("'%s' command timed out.\n", cmd);
-       return -2;
-	} 
-    else if (ret < 0)
-    {
-	   SWSS_LOG_NOTICE("'%s' command failed.\n", cmd);
-	   return -1;
-	}
-	if (1) 
-    {
-       buf[*len] = '\0';
-       SWSS_LOG_NOTICE("hostapd reply %s", buf);
-	}
-	wpa_ctrl_close(ctrl_conn);
-	return 0;
-}               

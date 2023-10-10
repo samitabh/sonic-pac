@@ -38,8 +38,6 @@ typedef struct radius_server_info_s {
   std::string server_key;
   std::string server_ip;
   std::string server_priority;
-  std::string server_vrf;
-  std::string server_source_intf;
   bool        server_update;
   bool        dns_ok;
 }radius_server_info_t;
@@ -48,32 +46,16 @@ typedef std::map<std::string, radius_server_info_t> radius_server_info_map_t;
 
 typedef struct radius_info_s {
   string m_radiusGlobalKey;
-  std::string nas_ip;
-  std::string mgmt_ip;
-  std::string mgmt_ipv6;
   radius_server_info_map_t radius_auth_server_list;
-  radius_server_info_map_t radius_acct_server_list;
 }radius_info_t;
 
-#define MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF L7_MAB_REQUEST_ATTRIBUTE1_GROUP_SIZE_2
-#define MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF L7_MAB_REQUEST_ATTRIBUTE1_SEPARATOR_LEGACY
-#define MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF L7_MAB_REQUEST_ATTRIBUTE1_CASE_UPPER
-#define MABMGR_MAB_PORT_ENABLE_DEF L7_DISABLE
-#define MABMGR_MAB_PORT_AUTH_TYPE_DEF L7_AUTHMGR_PORT_MAB_AUTH_TYPE_EAP_MD5
-#define MABMGR_MAB_PORT_SERVER_TIMEOUT_DEF  FD_MAB_PORT_SERVER_TIMEOUT
-
-/* MAB GLOBAL config table param cache Info */
-typedef struct {
-    L7_MAB_REQUEST_ATTRIBUTE1_GROUP_SIZE_t group_size;
-    L7_MAB_REQUEST_ATTRIBUTE1_SEPARATOR_t  separator;
-    L7_MAB_REQUEST_ATTRIBUTE1_CASE_t attrCase;
-} mabGlobalConfigCacheParams_t;
+#define MABMGR_MAB_PORT_ENABLE_DEF     DISABLE
+#define MABMGR_MAB_PORT_AUTH_TYPE_DEF  AUTHMGR_PORT_MAB_AUTH_TYPE_EAP_MD5
 
 /* MAB port config table param cache Info */
 typedef struct mabPortConfigCacheParams_t {
     bool mab_enable;
-    L7_AUTHMGR_PORT_MAB_AUTH_TYPE_t  mab_auth_type;
-    L7_uint32  mab_server_timeout;
+    AUTHMGR_PORT_MAB_AUTH_TYPE_t  mab_auth_type;
 } mabPortConfigCacheParams_t;
 
 /* MAP to store MAB port config table params,
@@ -92,43 +74,24 @@ public:
     std::vector<Selectable*> getSelectables();
     bool processDbEvent(Selectable *source);
 
-    /* Placeholder for MAB Global table config params */
-    static mabGlobalConfigCacheParams_t mabGlobalConfigTable;
-
-    /* Debug routine. */
-    void showDebugInfo(DebugShCmd *cmd);
-
 private:
     //tables this component listens to
     SubscriberStateTable m_confMabPortTbl;
-    SubscriberStateTable m_confMabGlobalTbl;
     SubscriberStateTable m_confRadiusServerTable;
     SubscriberStateTable m_confRadiusGlobalTable;
-    SubscriberStateTable m_mgmtIntfTbl;
-    SubscriberStateTable m_IntfTbl;
-    SubscriberStateTable m_VlanIntfTbl;
-    SubscriberStateTable m_LoIntfTbl;
-    SubscriberStateTable m_PoIntfTbl;
 
     radius_info_t m_radius_info;
     mabPortConfigTableMap     m_mabPortConfigMap;
 
     // DB Event handler functions
     bool processMabConfigPortTblEvent(Selectable *tbl);
-    bool processMabConfigGlobalTblEvent(Selectable *tbl);
     bool processRadiusServerTblEvent(Selectable *tbl);
     bool processRadiusGlobalTblEvent(Selectable *tbl);
-    bool processMgmtIntfTblEvent(Selectable *tbl);
-    bool processIntfTblEvent(Selectable *tbl);
-    bool doMabGlobalTableSetTask(const KeyOpFieldsValuesTuple & t);
-    bool doMabGlobalTableDeleteTask();
-    bool doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 & intIfNum);
-    bool doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, L7_uint32 & intIfNum);
+    bool doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, uint32 & intIfNum);
+    bool doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, uint32 & intIfNum);
 
     void updateRadiusServer();
     void updateRadiusServerGlobalKey(string newKey, string oldKey);
-    void updateRadiusGlobalInfo();
-    bool IsSourceIntf(const string interface);
     void reloadRadiusServers() ;
 };
 

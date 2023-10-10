@@ -33,59 +33,17 @@ MabMgr *mab;
 
 const string INTFS_PREFIX = "E";
 
-DEBUGSH_CLI(MabMgrRadiusStats,
-            "show system internal mabmgr radius-stats",
-            SHOW_COMMAND,
-            SYSTEM_DEBUG_COMMAND,
-            INTERNAL_COMMAND,
-            "MabMgr related commands",
-            "Radius stats")
-{
-    mab->showDebugInfo(this);
-}
-
-
-mabGlobalConfigCacheParams_t MabMgr::mabGlobalConfigTable = { MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF,
-                                                              MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF,
-                                                              MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF };
-
 MabMgr::MabMgr(DBConnector *configDb, DBConnector *stateDb, DBConnector *appDb) :
                            m_confMabPortTbl(configDb, "MAB_PORT_CONFIG_TABLE"),
-                           m_confMabGlobalTbl(configDb, "MAB_GLOBAL_CONFIG_TABLE"),
                            m_confRadiusServerTable(configDb, "RADIUS_SERVER"),
-                           m_confRadiusGlobalTable(configDb, "RADIUS"),
-                           m_mgmtIntfTbl(appDb, "MGMT_INTF_TABLE"),
-                           m_IntfTbl(configDb, CFG_INTF_TABLE_NAME),
-                           m_VlanIntfTbl(configDb, CFG_VLAN_INTF_TABLE_NAME),
-                           m_LoIntfTbl(configDb, CFG_LOOPBACK_INTERFACE_TABLE_NAME),
-                           m_PoIntfTbl(configDb, CFG_LAG_INTF_TABLE_NAME) {
+                           m_confRadiusGlobalTable(configDb, "RADIUS") {
 
     Logger::linkToDbNative("mabmgr");
-    SWSS_LOG_DEBUG("Installing MabMgr commands");
     mab = this;
-    DebugShCmd::install(new MabMgrRadiusStats());
-
-}
-
-void MabMgr::showDebugInfo(DebugShCmd *cmd)
-{
-    char buffer[MABD_CMD_BUFFSZ];
-
-    memset(buffer, 0, sizeof(buffer));
-
-    if (L7_SUCCESS == mabRadiusClientGetStats(buffer, sizeof(buffer))) 
-    {
-        DEBUGSH_OUT(cmd, "Dumping MabMgr radius stats\n\n");
-        DEBUGSH_OUT(cmd, "==============================================\n");
-
-        DEBUGSH_OUT(cmd, "%s", buffer);
-        DEBUGSH_OUT(cmd, "\n==============================================\n\n");
-    }
 }
 
 std::vector<Selectable*> MabMgr::getSelectables() {
-    vector<Selectable *> selectables{ &m_confMabPortTbl, &m_confMabGlobalTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable, 
-                                      &m_mgmtIntfTbl, &m_IntfTbl, &m_VlanIntfTbl, &m_PoIntfTbl, &m_LoIntfTbl };
+    vector<Selectable *> selectables{ &m_confMabPortTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable }; 
     return selectables;
 }
 
@@ -100,27 +58,12 @@ bool MabMgr::processDbEvent(Selectable *tbl) {
         return processMabConfigPortTblEvent(tbl);
     }
 
-    if (tbl == ((Selectable *) & m_confMabGlobalTbl)) {
-        return processMabConfigGlobalTblEvent(tbl);
-    }
-
     if (tbl == ((Selectable *) & m_confRadiusServerTable)) {
         return processRadiusServerTblEvent(tbl);
     }
 
     if (tbl == ((Selectable *) & m_confRadiusGlobalTable)) {
         return processRadiusGlobalTblEvent(tbl);
-    }
-
-    if (tbl == ((Selectable *) & m_mgmtIntfTbl)) {
-         return processMgmtIntfTblEvent(tbl);
-    }
-
-    if ((tbl == ((Selectable *) & m_IntfTbl)) ||
-        (tbl == ((Selectable *) & m_VlanIntfTbl)) ||        
-        (tbl == ((Selectable *) & m_LoIntfTbl)) ||        
-        (tbl == ((Selectable *) & m_PoIntfTbl))) {
-         return processIntfTblEvent(tbl);
     }
 
     SWSS_LOG_DEBUG("Received event UNKNOWN to MAB, ignoring ");
@@ -151,7 +94,7 @@ bool MabMgr::processMabConfigPortTblEvent(Selectable *tbl)
     std::string key = kfvKey(entry);
     std::string  op = kfvOp(entry);
     bool task_result = false;
-    L7_uint32 intIfNum;
+    uint32 intIfNum;
 
     SWSS_LOG_DEBUG("Received %s as key and %s as OP", key.c_str(), op.c_str());
 
@@ -161,7 +104,7 @@ bool MabMgr::processMabConfigPortTblEvent(Selectable *tbl)
         continue;
     }
 
-    if(fpGetIntIfNumFromHostIfName(key.c_str(), &intIfNum) != L7_SUCCESS)
+    if(fpGetIntIfNumFromHostIfName(key.c_str(), &intIfNum) !=  SUCCESS)
     {
         SWSS_LOG_NOTICE("Unable to get the internal interface number for %s.", key.c_str());
         continue;
@@ -181,7 +124,7 @@ bool MabMgr::processMabConfigPortTblEvent(Selectable *tbl)
      return true;
 }
 
-bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 & intIfNum)
+bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, uint32 & intIfNum)
 {
     SWSS_LOG_ENTER();
     const std::string & key = kfvKey(t);
@@ -190,7 +133,6 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
     mabPortConfigCacheParams_t mabPortConfigCache;
     mabPortConfigCache.mab_enable = MABMGR_MAB_PORT_ENABLE_DEF;
     mabPortConfigCache.mab_auth_type = MABMGR_MAB_PORT_AUTH_TYPE_DEF;
-    mabPortConfigCache.mab_server_timeout = MABMGR_MAB_PORT_SERVER_TIMEOUT_DEF;
 
     for (auto item = kfvFieldsValues(t).begin(); item != kfvFieldsValues(t).end(); item++)
     {
@@ -200,9 +142,9 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
         if (field == "mab_enable")
         {
             if (value == "true")
-               mabPortConfigCache.mab_enable = L7_ENABLE;
+               mabPortConfigCache.mab_enable =  ENABLE;
             else if (value == "false")
-               mabPortConfigCache.mab_enable = L7_DISABLE;
+               mabPortConfigCache.mab_enable =  DISABLE;
             else {
                SWSS_LOG_WARN("Invalid configuration option received for mab enable: %s", value.c_str());
                continue;
@@ -211,19 +153,15 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
         if (field == "mab_auth_type")
         {
             if (value == "pap")
-                mabPortConfigCache.mab_auth_type= L7_AUTHMGR_PORT_MAB_AUTH_TYPE_PAP;
+                mabPortConfigCache.mab_auth_type=  AUTHMGR_PORT_MAB_AUTH_TYPE_PAP;
             else if (value == "chap")
-                mabPortConfigCache.mab_auth_type = L7_AUTHMGR_PORT_MAB_AUTH_TYPE_CHAP;
+                mabPortConfigCache.mab_auth_type =  AUTHMGR_PORT_MAB_AUTH_TYPE_CHAP;
             else if (value == "eap-md5")
-                mabPortConfigCache.mab_auth_type = L7_AUTHMGR_PORT_MAB_AUTH_TYPE_EAP_MD5;
+                mabPortConfigCache.mab_auth_type =  AUTHMGR_PORT_MAB_AUTH_TYPE_EAP_MD5;
             else {
                SWSS_LOG_WARN("Invalid configuration option received for mab auth type: %s", value.c_str());
                continue;
             }
-        }
-        if (field == "server_timeout")
-        {
-            mabPortConfigCache.mab_server_timeout =  (unsigned int)stoi(value);
         }
     }
 
@@ -235,7 +173,7 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
 
         if(mabPortConfigCache.mab_enable != MABMGR_MAB_PORT_ENABLE_DEF)
         {
-            if (L7_SUCCESS != mabPortMABEnableSet(intIfNum, mabPortConfigCache.mab_enable))
+            if ( SUCCESS != mabPortMABEnableSet(intIfNum, mabPortConfigCache.mab_enable))
             {
               iter->second.mab_enable = MABMGR_MAB_PORT_ENABLE_DEF;
               SWSS_LOG_ERROR("Unable to enable MAB operationally.");
@@ -243,18 +181,10 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
         }
         if(mabPortConfigCache.mab_auth_type != MABMGR_MAB_PORT_AUTH_TYPE_DEF)
         {
-            if (L7_SUCCESS != mabPortMABAuthTypeSet(intIfNum, mabPortConfigCache.mab_auth_type))
+            if ( SUCCESS != mabPortMABAuthTypeSet(intIfNum, mabPortConfigCache.mab_auth_type))
             {
               iter->second.mab_auth_type = MABMGR_MAB_PORT_AUTH_TYPE_DEF;
               SWSS_LOG_ERROR("Unable to set MAB authentication type operationally.");
-            }
-        }
-        if(MABMGR_MAB_PORT_SERVER_TIMEOUT_DEF != mabPortConfigCache.mab_server_timeout)
-        {
-            if (L7_SUCCESS != mabPortMABServerTimeoutSet(intIfNum, mabPortConfigCache.mab_server_timeout))
-            {
-              iter->second.mab_server_timeout = MABMGR_MAB_PORT_SERVER_TIMEOUT_DEF;
-              SWSS_LOG_ERROR("Unable to set MAB port server timeout.");
             }
         }
      }
@@ -266,7 +196,7 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
             ((iter->second.mab_enable != MABMGR_MAB_PORT_ENABLE_DEF) &&
             (mabPortConfigCache.mab_enable != iter->second.mab_enable)))
         {
-            if (L7_SUCCESS == mabPortMABEnableSet(intIfNum, mabPortConfigCache.mab_enable))
+            if ( SUCCESS == mabPortMABEnableSet(intIfNum, mabPortConfigCache.mab_enable))
             {
               iter->second.mab_enable = mabPortConfigCache.mab_enable;
             }
@@ -282,7 +212,7 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
             ((iter->second.mab_auth_type != MABMGR_MAB_PORT_AUTH_TYPE_DEF) &&
             (mabPortConfigCache.mab_auth_type != iter->second.mab_auth_type)))
         {
-            if (L7_SUCCESS == mabPortMABAuthTypeSet(intIfNum, mabPortConfigCache.mab_auth_type))
+            if ( SUCCESS == mabPortMABAuthTypeSet(intIfNum, mabPortConfigCache.mab_auth_type))
             {
               iter->second.mab_auth_type = mabPortConfigCache.mab_auth_type;
             }
@@ -292,24 +222,11 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, L7_uint32 &
               return false;
             }
         }
-        if (iter->second.mab_server_timeout != mabPortConfigCache.mab_server_timeout)
-        {
-            if (L7_SUCCESS == 
-                   mabPortMABServerTimeoutSet(intIfNum, mabPortConfigCache.mab_server_timeout))
-            {
-              iter->second.mab_server_timeout = mabPortConfigCache.mab_server_timeout;
-            }
-            else
-            {
-              SWSS_LOG_ERROR("Unable to set MAB port server timeout.");
-              return false;
-            }
-        }
       }
       return true;
 }
 
-bool MabMgr::doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, L7_uint32 & intIfNum)
+bool MabMgr::doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, uint32 & intIfNum)
 {
     SWSS_LOG_ENTER();
     const std::string & key = kfvKey(t);
@@ -318,7 +235,7 @@ bool MabMgr::doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, L7_uint3
     {
       if (iter->second.mab_enable != MABMGR_MAB_PORT_ENABLE_DEF)
       {
-            if (L7_SUCCESS == mabPortMABEnableSet(intIfNum, MABMGR_MAB_PORT_ENABLE_DEF))
+            if ( SUCCESS == mabPortMABEnableSet(intIfNum, MABMGR_MAB_PORT_ENABLE_DEF))
             {
                 iter->second.mab_enable = MABMGR_MAB_PORT_ENABLE_DEF;
             }
@@ -330,7 +247,7 @@ bool MabMgr::doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, L7_uint3
       }
       if (iter->second.mab_auth_type != MABMGR_MAB_PORT_AUTH_TYPE_DEF)
       {
-            if (L7_SUCCESS == mabPortMABAuthTypeSet(intIfNum, MABMGR_MAB_PORT_AUTH_TYPE_DEF))
+            if ( SUCCESS == mabPortMABAuthTypeSet(intIfNum, MABMGR_MAB_PORT_AUTH_TYPE_DEF))
             {
               iter->second.mab_auth_type = MABMGR_MAB_PORT_AUTH_TYPE_DEF;
             }
@@ -340,208 +257,6 @@ bool MabMgr::doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, L7_uint3
               return false;
             }
       }
-      if (MABMGR_MAB_PORT_SERVER_TIMEOUT_DEF != iter->second.mab_server_timeout)
-      {
-          if (L7_SUCCESS == 
-                   mabPortMABServerTimeoutSet(intIfNum, MABMGR_MAB_PORT_SERVER_TIMEOUT_DEF))
-          {
-             iter->second.mab_server_timeout = MABMGR_MAB_PORT_SERVER_TIMEOUT_DEF; 
-          }
-          else
-          {
-             SWSS_LOG_ERROR("Unable to set MAB port server timeout.");
-             return false;
-          }
-      }
-    }
-    return true;
-}
-
-bool MabMgr::processMabConfigGlobalTblEvent(Selectable *tbl) 
-{
-  SWSS_LOG_DEBUG("Received a table config event on MAB_GLOBAL_CONFIG_TABLE table");
-
-  std::deque<KeyOpFieldsValuesTuple> entries;
-  m_confMabGlobalTbl.pops(entries);
-
-  SWSS_LOG_DEBUG("Received %d entries", (int) entries.size());
-
-  /* Nothing popped */
-  if (entries.empty())
-  {
-    return false;
-  }
-
-  // Check through all the data
-  for (auto entry : entries) 
-  {
-    std::string key = kfvKey(entry);
-    std::string  op = kfvOp(entry);
-    bool task_result = false;
-
-    SWSS_LOG_DEBUG("Received %s as key and %s as OP", key.c_str(), op.c_str());
-
-    if (op == SET_COMMAND)
-    {
-            task_result = doMabGlobalTableSetTask(entry);
-        }
-        else if (op == DEL_COMMAND)
-        {
-            task_result = doMabGlobalTableDeleteTask();
-        }
-        if (!task_result)
-            return false;
-    }
-    return true;
-}
-
-bool MabMgr::doMabGlobalTableSetTask(const KeyOpFieldsValuesTuple & t)
-{
-    SWSS_LOG_ENTER();
-
-    // Update mabGlobalConfigCache with incoming table data
-    mabGlobalConfigCacheParams_t mabGlobalConfigCache;
-    mabGlobalConfigCache.group_size = MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF;
-    mabGlobalConfigCache.separator = MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF;
-    mabGlobalConfigCache.attrCase = MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF;
-
-    for (auto item = kfvFieldsValues(t).begin(); item != kfvFieldsValues(t).end(); item++)
-    {
-        const std::string & field = fvField(*item);
-        const std::string & value = fvValue(*item);
-
-        if (field == "group_size")
-        {
-            if(value == "1")
-               mabGlobalConfigCache.group_size = L7_MAB_REQUEST_ATTRIBUTE1_GROUP_SIZE_1;
-            else if(value == "2")
-               mabGlobalConfigCache.group_size = L7_MAB_REQUEST_ATTRIBUTE1_GROUP_SIZE_2;
-            else if(value == "4")
-               mabGlobalConfigCache.group_size = L7_MAB_REQUEST_ATTRIBUTE1_GROUP_SIZE_4;
-            else if(value == "12")
-               mabGlobalConfigCache.group_size = L7_MAB_REQUEST_ATTRIBUTE1_GROUP_SIZE_12;
-            else {
-               SWSS_LOG_WARN("Invalid option recieved for groupsize MAB request format attribute1: %s", value.c_str());
-               continue;
-            }
-        }
-        if (field == "separator")
-        {
-            if(value == "-")
-               mabGlobalConfigCache.separator = L7_MAB_REQUEST_ATTRIBUTE1_SEPARATOR_IETF;
-            else if(value == ":")
-               mabGlobalConfigCache.separator = L7_MAB_REQUEST_ATTRIBUTE1_SEPARATOR_LEGACY;
-            else if(value == ".")
-               mabGlobalConfigCache.separator = L7_MAB_REQUEST_ATTRIBUTE1_SEPARATOR_DOT;
-            else {
-               SWSS_LOG_WARN("Invalid option recieved for separator MAB request format attribute1: %s", value.c_str());
-               continue;
-            }
-        }
-        if (field == "case")
-        {
-            if(value == "lowercase")
-               mabGlobalConfigCache.attrCase = L7_MAB_REQUEST_ATTRIBUTE1_CASE_LOWER;
-            else if(value == "uppercase")
-               mabGlobalConfigCache.attrCase = L7_MAB_REQUEST_ATTRIBUTE1_CASE_UPPER;
-            else {
-               SWSS_LOG_WARN("Invalid option recieved for case MAB request format attribute1: %s", value.c_str());
-               continue;
-            }
-        }
-    }
-
-    // Update MAB global config placeholder with table updates
-    // group_size
-    if (((mabGlobalConfigTable.group_size == MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF) &&
-       (mabGlobalConfigCache.group_size != MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF)) ||
-       ((mabGlobalConfigTable.group_size != MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF) &&
-       (mabGlobalConfigCache.group_size != mabGlobalConfigTable.group_size)))
-    {
-       if (L7_SUCCESS == mabRequestFormatAttribut1GroupSizeSet(mabGlobalConfigCache.group_size))
-       {
-         mabGlobalConfigTable.group_size = mabGlobalConfigCache.group_size;
-       }
-       else
-       {
-         SWSS_LOG_ERROR("Unable to set the groupsize for formatting the MAB attribute1.");
-         return false;
-       }
-    }
-    // separator
-    if (((mabGlobalConfigTable.separator == MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF) &&
-       (mabGlobalConfigCache.separator != MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF)) ||
-       ((mabGlobalConfigTable.separator != MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF) &&
-       (mabGlobalConfigCache.separator != mabGlobalConfigTable.separator)))
-    {
-       if (L7_SUCCESS == mabRequestFormatAttribute1SeparatorSet(mabGlobalConfigCache.separator))
-       {
-         mabGlobalConfigTable.separator = mabGlobalConfigCache.separator;
-       }
-       else
-       {
-         SWSS_LOG_ERROR("Unable to set the separator for formatting the MAB attribute1.");
-       return false;
-       }
-    }
-    // case
-    if (((mabGlobalConfigTable.attrCase == MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF) &&
-       (mabGlobalConfigCache.attrCase != MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF)) ||
-       ((mabGlobalConfigTable.attrCase != MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF) &&
-       (mabGlobalConfigCache.attrCase != mabGlobalConfigTable.attrCase)))
-    {
-       if (L7_SUCCESS == mabRequestFormatAttribute1CaseSet(mabGlobalConfigCache.attrCase))
-       {
-         mabGlobalConfigTable.attrCase = mabGlobalConfigCache.attrCase;
-       }
-       else
-       {
-         SWSS_LOG_ERROR("Unable to set the case for formatting the MAB attribute1.");
-         return false;
-       }
-    }
-    return true;
-}
-
-bool MabMgr::doMabGlobalTableDeleteTask()
-{
-    SWSS_LOG_ENTER();
-
-    if (mabGlobalConfigTable.group_size != MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF)
-    {
-         if (L7_SUCCESS == mabRequestFormatAttribut1GroupSizeSet(MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF))
-         {
-           mabGlobalConfigTable.group_size = MABMGR_REQUEST_ATTRIBUTE1_GROUP_SIZE_DEF;
-         }
-         else
-         {
-           SWSS_LOG_ERROR("Unable to set groupsize with default for formatting the MAB attribute1.");
-           return false;
-         }
-    }
-    if (mabGlobalConfigTable.separator != MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF)
-    {
-         if (L7_SUCCESS == mabRequestFormatAttribute1SeparatorSet(MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF))
-         {
-           mabGlobalConfigTable.separator = MABMGR_REQUEST_ATTRIBUTE1_SEPARATOR_DEF;
-         }
-         else
-         {
-           SWSS_LOG_ERROR("Unable to set separator with default for formatting the MAB attribute1.");
-           return false;
-         }
-    }
-    if (mabGlobalConfigTable.attrCase != MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF)
-    {
-         if (L7_SUCCESS == mabRequestFormatAttribute1CaseSet(MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF))
-         {
-           mabGlobalConfigTable.attrCase = MABMGR_REQUEST_ATTRIBUTE1_CASE_DEF;
-         }
-         else
-         {
-           SWSS_LOG_ERROR("Unable to set case for formatting the MAB attribute1.");
-           return false;
-         }
     }
     return true;
 }
@@ -573,7 +288,7 @@ void MabMgr::updateRadiusServerGlobalKey(string newKey, string oldKey) {
 
    SWSS_LOG_ENTER();
    bool update = false;
-   L7_RC_t rc = L7_FAILURE;
+   RC_t rc =  FAILURE;
 
    if (0 == newKey.compare(oldKey))
    {
@@ -600,10 +315,8 @@ void MabMgr::updateRadiusServerGlobalKey(string newKey, string oldKey) {
                                     item.second.server_ip.c_str(),
                                     item.second.server_priority.c_str(),
                                     oldKey.c_str(),
-                                    item.second.server_port.c_str(),
-                                    item.second.server_vrf.c_str(),
-                                    item.second.server_source_intf.c_str());
-         if (L7_SUCCESS != rc)
+                                    item.second.server_port.c_str());
+         if ( SUCCESS != rc)
          {
              SWSS_LOG_ERROR("Unable to update radius server details for MAB ip = %s,  port = %s, priority = %s",
                             item.second.server_ip.c_str(),
@@ -623,7 +336,7 @@ void MabMgr::updateRadiusServerGlobalKey(string newKey, string oldKey) {
 void MabMgr::updateRadiusServer() {
 
    SWSS_LOG_ENTER();
-   L7_RC_t rc = L7_FAILURE;
+   RC_t rc =  FAILURE;
    struct addrinfo* result;
    char ip[INET6_ADDRSTRLEN+1];
    void * src = NULL;
@@ -673,10 +386,8 @@ void MabMgr::updateRadiusServer() {
        rc = mabRadiusServerUpdate(RADIUS_MAB_SERVER_ADD, "auth", item.second.server_ip.c_str(),
                               item.second.server_priority.c_str(),
                               newKey.c_str(),
-                              item.second.server_port.c_str(),
-                              item.second.server_vrf.c_str(),
-                              item.second.server_source_intf.c_str());
-       if (L7_SUCCESS != rc)
+                              item.second.server_port.c_str());
+       if ( SUCCESS != rc)
        {
            SWSS_LOG_ERROR("Radius server update - Unable to update radius server details for MAB.");
            return;
@@ -691,43 +402,10 @@ void MabMgr::updateRadiusServer() {
    return;
 }
 
-void MabMgr::updateRadiusGlobalInfo() {
-  L7_RC_t rc = L7_FAILURE;
-  string nas_ip("");
-  string nas_id("");
-
-  if (m_radius_info.nas_ip.size())
-  {
-    nas_ip = m_radius_info.nas_ip;
-    nas_id = m_radius_info.nas_ip;
-  }
-  else if (m_radius_info.mgmt_ip.size())
-  {
-    nas_ip = m_radius_info.mgmt_ip;
-    nas_id = m_radius_info.mgmt_ip;
-  }
-  else if (m_radius_info.mgmt_ipv6.size())
-  {
-    nas_ip = m_radius_info.mgmt_ipv6;
-    nas_id = m_radius_info.mgmt_ipv6;
-  }
-
-  if (nas_ip.size() && nas_id.size())
-  {
-    rc = mabRadiusGlobalCfgUpdate(nas_ip.c_str(), nas_id.c_str());
-    if (L7_SUCCESS != rc)
-    {
-       SWSS_LOG_ERROR("Unable to update radius global configuration nas ip = %s,  nas_id = %s",
-                      nas_ip.c_str(), nas_id.c_str());
-    }
-  }
-  return;
-}
-
 void MabMgr::reloadRadiusServers() 
 {
    SWSS_LOG_ENTER();
-   L7_RC_t rc = L7_FAILURE;
+   RC_t rc =  FAILURE;
    bool server_update = false;
 
    SWSS_LOG_NOTICE("Reloading RADIUS Servers for MAB");
@@ -749,9 +427,9 @@ void MabMgr::reloadRadiusServers()
    }
 
    rc = mabRadiusServerUpdate(RADIUS_MAB_SERVERS_RELOAD, "auth", 
-                              NULL, NULL, NULL, NULL, NULL, NULL);
+                              NULL, NULL, NULL, NULL);
 
-   if (L7_SUCCESS != rc)
+   if ( SUCCESS != rc)
    {
        SWSS_LOG_ERROR("RADIUS Servers reload - Unable to reload.");
    }
@@ -791,8 +469,6 @@ bool MabMgr::processRadiusServerTblEvent(Selectable *tbl)
       m_radius_info.radius_auth_server_list[key].server_port = "";
       m_radius_info.radius_auth_server_list[key].server_key = "";
       m_radius_info.radius_auth_server_list[key].server_priority = "";
-      m_radius_info.radius_auth_server_list[key].server_vrf = "";
-      m_radius_info.radius_auth_server_list[key].server_source_intf = "";
       m_radius_info.radius_auth_server_list[key].server_update = true;
       m_radius_info.radius_auth_server_list[key].dns_ok = true;
 
@@ -824,20 +500,12 @@ bool MabMgr::processRadiusServerTblEvent(Selectable *tbl)
         {
           m_radius_info.radius_auth_server_list[key].server_priority = b; 
         }
-        else if (a == "vrf")
-        {
-          m_radius_info.radius_auth_server_list[key].server_vrf = b; 
-        }
-        else if (a == "src_intf")
-        {
-          m_radius_info.radius_auth_server_list[key].server_source_intf = b; 
-        }
       }
       updateRadiusServer();
     }
     else if (val == DEL_COMMAND)
     {
-      L7_RC_t rc = L7_FAILURE;
+      RC_t rc =  FAILURE;
       SWSS_LOG_INFO("Delete Radius server for MAB %s ", 
                        m_radius_info.radius_auth_server_list[key].server_ip.c_str()); 
       // server deleted
@@ -845,10 +513,8 @@ bool MabMgr::processRadiusServerTblEvent(Selectable *tbl)
                                  m_radius_info.radius_auth_server_list[key].server_ip.c_str(),
                                  m_radius_info.radius_auth_server_list[key].server_priority.c_str(),
                                  m_radius_info.radius_auth_server_list[key].server_key.c_str(),
-                                 m_radius_info.radius_auth_server_list[key].server_port.c_str(),
-                                 m_radius_info.radius_auth_server_list[key].server_vrf.c_str(),
-                                 m_radius_info.radius_auth_server_list[key].server_source_intf.c_str());
-      if (rc != L7_SUCCESS)
+                                 m_radius_info.radius_auth_server_list[key].server_port.c_str());
+      if (rc !=  SUCCESS)
       {
          SWSS_LOG_ERROR("Radius server delete - Unable to delete radius server details for MAB.");
       }
@@ -864,7 +530,6 @@ bool MabMgr::processRadiusGlobalTblEvent(Selectable *tbl)
   SWSS_LOG_ENTER();
   SWSS_LOG_NOTICE("Received a RADIUS event");
   string tmp_radiusGlobalKey(m_radius_info.m_radiusGlobalKey);
-  string tmp_nas_ip(m_radius_info.nas_ip);
 
   deque<KeyOpFieldsValuesTuple> entries;
   m_confRadiusGlobalTable.pops(entries);
@@ -886,10 +551,6 @@ bool MabMgr::processRadiusGlobalTblEvent(Selectable *tbl)
 
     SWSS_LOG_NOTICE("Received %s as key and %s as OP", key.c_str(), val.c_str());
 
-    // Removal of radius key and nas_ip as these are also sent as a SET
-    m_radius_info.m_radiusGlobalKey = "";
-    m_radius_info.nas_ip = "";
-
     if (val == SET_COMMAND)
     {
       SWSS_LOG_NOTICE("SET operation on RADIUS table");
@@ -897,7 +558,6 @@ bool MabMgr::processRadiusGlobalTblEvent(Selectable *tbl)
       // Look at the data that is sent for this key
       for (auto i : kfvFieldsValues(entry))
       {
-
         string a = fvField(i);
         string b = fvValue(i);
 
@@ -914,138 +574,15 @@ bool MabMgr::processRadiusGlobalTblEvent(Selectable *tbl)
           }
           m_radius_info.m_radiusGlobalKey = ret._2;
         }
-        else if (a == "nas_ip")
-        {
-          m_radius_info.nas_ip = b;
-        }
       }
     }
     else if (val == DEL_COMMAND)
     {
       m_radius_info.m_radiusGlobalKey = ""; 
-      m_radius_info.nas_ip = "";
     }
   }
 
   updateRadiusServerGlobalKey(m_radius_info.m_radiusGlobalKey, tmp_radiusGlobalKey);
 
-  if (m_radius_info.nas_ip != tmp_nas_ip)
-  {
-    updateRadiusGlobalInfo();
-  }
-
   return true;
 }
-
-bool MabMgr::processMgmtIntfTblEvent(Selectable *tbl)
-{
-  std::deque<KeyOpFieldsValuesTuple> entries;
-  m_mgmtIntfTbl.pops(entries);
-  SWSS_LOG_NOTICE("Received %d entries from config event on MGMT_INTERFACE Table", (int) entries.size());
-
-  // Removal of MGMT IP also is sent as a SET
-  m_radius_info.mgmt_ip = "";
-  m_radius_info.mgmt_ipv6 = "";
-
-  for (auto entry : entries) 
-  {
-    std::string key = kfvKey(entry);
-    SWSS_LOG_NOTICE("key %s", key.c_str());
-
-    auto tokens = tokenize(key, ':');
-    SWSS_LOG_NOTICE("size %d", tokens.size());
-
-    // pick only IPv4 address of the management interface
-    if (2 == tokens.size())
-    {
-      // eth0:a.b.c.d/mask
-      auto tokens1 = tokenize(tokens[1], '/');
-      SWSS_LOG_NOTICE("Management IPv4 %s", tokens1[0].c_str());
-      m_radius_info.mgmt_ip = tokens1[0];
-    }
-    else if (tokens.size() > 2)
-    {
-      // eth0:2001::64/mask. Remove "eth0:"
-      string ipv6Str = key.substr(5);
-
-      auto tokens1 = tokenize(ipv6Str, '/');
-      SWSS_LOG_NOTICE("Management IPv6 %s", tokens1[0].c_str());
-      m_radius_info.mgmt_ipv6 = tokens1[0];
-    }
-  }
-
-  string mgmt_intf("eth0");
-
-  if (0 == m_radius_info.nas_ip.size())
-  {
-    SWSS_LOG_NOTICE("Interface %s address update for nas ip.", mgmt_intf.c_str());
-    updateRadiusGlobalInfo();
-  }
-
-  reloadRadiusServers();
-
-  return true;
-}
-
-bool MabMgr::IsSourceIntf(const string interface)
-{
-  for (auto& item: m_radius_info.radius_auth_server_list)
-  {
-    if (item.second.server_source_intf == interface)
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool MabMgr::processIntfTblEvent(Selectable *tbl)
-{
-  std::deque<KeyOpFieldsValuesTuple> entries;
-
-  if (tbl == ((Selectable *) & m_IntfTbl))
-  {
-    m_IntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on INTERFACE Table", (int) entries.size());
-  }
-  else if (tbl == ((Selectable *) & m_VlanIntfTbl))
-  {
-    m_VlanIntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on VLAN_INTERFACE Table", (int) entries.size());
-  }
-  else if (tbl == ((Selectable *) & m_LoIntfTbl))
-  {
-    m_LoIntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on LOOPBACK_INTERFACE Table", (int) entries.size());
-  }
-  else if (tbl == ((Selectable *) & m_PoIntfTbl))
-  {
-    m_PoIntfTbl.pops(entries);
-    SWSS_LOG_NOTICE("Received %d entries from config event on PORTCHANNEL_INTERFACE Table", (int) entries.size());
-  }
-
-  for (auto entry : entries) 
-  {
-    std::string key = kfvKey(entry);
-    SWSS_LOG_NOTICE("key %s", key.c_str());
-
-    auto key_tokens = tokenize(key, '|');
-    SWSS_LOG_NOTICE("size %d", key_tokens.size());
-
-    if (2 == key_tokens.size())
-    {
-      // Ethernet0|IPAddress
-      if (IsSourceIntf(key_tokens[0]))
-      {
-        auto ip_tokens = tokenize(key_tokens[1], '/');
-        SWSS_LOG_NOTICE("Interface %s used as Source Interface. Address %s/%s", 
-                        key_tokens[0].c_str(), ip_tokens[0].c_str(), ip_tokens[1].c_str());
-        reloadRadiusServers();
-        break;
-      }
-    }
-  }
-
-  return true;
-}
-
