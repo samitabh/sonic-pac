@@ -128,6 +128,7 @@ private:
   bool processHostapdConfigGlobalTblEvent(Selectable *tbl);
   bool processRadiusServerTblEvent(Selectable *tbl);
   bool processRadiusGlobalTblEvent(Selectable *tbl);
+  bool processHostapdUserCfgTblEvent(Selectable *tbl); //CG_PAC
 
   void writeToFile(const string& filename, const string& value);
   void informHostapd(const string& type, const vector<string> & interfaces);
