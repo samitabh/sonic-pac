@@ -134,7 +134,9 @@ private:
     bool processRadiusGlobalTblEvent(Selectable *tbl);
     bool doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, uint32 & intIfNum);
     bool doMabPortTableDeleteTask(const KeyOpFieldsValuesTuple & t, uint32 & intIfNum);
-
+    bool processMabUserCfgTblEvent(Selectable *tbl); //CG_PAC
+    bool doMabUserCfgTableSetTask(const KeyOpFieldsValuesTuple & t);
+    bool doMabUserCfgTableDeleteTask(const KeyOpFieldsValuesTuple & t);
     void updateRadiusServer();
     void updateRadiusServerGlobalKey(string newKey, string oldKey);
     void reloadRadiusServers() ;
