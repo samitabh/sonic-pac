@@ -144,11 +144,44 @@ bool HostapdMgr::processHostapdUserCfgTblEvent(Selectable *tbl)
    }
    return true;
 }
-
-void HostapdMgr::updateUserConfigFile(const string& username_key)
-{/*CG_PAC*/
+void HostapdMgr::updateUserConfigFile(const string& username_key) { //CG_PAC
     SWSS_LOG_ENTER();
-    //TODO: To Be Merged
+
+    string content; // Store the updated content here
+
+    hostapdUserConfigTableMap::iterator iter = m_hostapdUserConfigMap.find(username_key);
+    if (iter != m_hostapdUserConfigMap.end()) {
+        // Check if the file exists
+        struct stat buffer;
+        if (stat(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH.c_str(), &buffer) == 0) {
+            // The file exists, so we can attempt to update it
+            // Open the file and update the user's information
+            std::ifstream infile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
+            std::string line;
+
+            while (std::getline(infile, line)) {
+                size_t posUsername = line.find(iter->first);
+                size_t posAuthType = line.find(iter->second.auth_type);
+
+                if (posUsername != std::string::npos && posAuthType != std::string::npos) {
+                    // Update the password with the new password and store it in 'content'
+                    content += iter->first + " " + iter->second.auth_type + " " + iter->second.password + "\n";
+                } else {
+                    content += line + "\n";
+                }
+            }
+
+            infile.close();
+
+            // Write the updated content to the file using writeToFile
+            writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, content);
+            SWSS_LOG_INFO("Updated Hostapd User Config file: %s", HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH.c_str());
+        } else {
+            SWSS_LOG_ERROR("Hostapd User Config file does not exist at: %s", HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH.c_str());
+        }
+    } else {
+        SWSS_LOG_ERROR("Username key not found in the hostapdUserConfigMap: %s", username_key.c_str());
+    }
 }
 
 void HostapdMgr::deleteUserConfigFile(const string& username_key)
