@@ -44,7 +44,8 @@ HostapdMgr::HostapdMgr(DBConnector *configDb, DBConnector *appDb) :
                            m_confHostapdPortTbl(configDb, CFG_PAC_PORT_CONFIG_TABLE),
                            m_confHostapdGlobalTbl(configDb, CFG_PAC_HOSTAPD_GLOBAL_CONFIG_TABLE),
                            m_confRadiusServerTable(configDb, "RADIUS_SERVER"),
-                           m_confRadiusGlobalTable(configDb, "RADIUS")
+                           m_confRadiusGlobalTable(configDb, "RADIUS"),
+                           m_confHostapdUserCfgTbl(configDb, "HOSTAPD_USER_CONFIG") /*CG_PAC*/
 
 {
   Logger::linkToDbNative("hostapdmgr");
@@ -68,7 +69,7 @@ string HostapdMgr::getStdIfFormat(string key)
 }
 
 vector<Selectable*> HostapdMgr::getSelectables() {
-    vector<Selectable *> selectables{ &m_confHostapdPortTbl, &m_confHostapdGlobalTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable};
+    vector<Selectable *> selectables{ &m_confHostapdPortTbl, &m_confHostapdGlobalTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable, &m_confHostapdUserCfgTbl /*CG_PAC*/};
     return selectables;
 }
 
@@ -95,11 +96,175 @@ bool HostapdMgr::processDbEvent(Selectable *tbl) {
         return processRadiusGlobalTblEvent(tbl);
     }
 
+    if (tbl == ((Selectable *) & m_confHostapdUserCfgTbl)) { /*CG_PAC*/
+        return processHostapdUserCfgTblEvent(tbl);
+    }
+
     SWSS_LOG_DEBUG("Received event UNKNOWN to HOSTAPD, ignoring ");
     return false;
 }
 
 //Process the config db table events
+bool HostapdMgr::processHostapdUserCfgTblEvent(Selectable *tbl)
+{ /*CG_PAC*/
+  bool ret_flag = false;
+  deque<KeyOpFieldsValuesTuple> db_entries;
+
+  SWSS_LOG_ENTER();
+  m_confHostapdPortTbl.pops(db_entries);
+  SWSS_LOG_DEBUG("Received HOSTAPD_USER_CONFIG DB table event with %d entries", (int) db_entries.size());
+
+  if (db_entries.empty())
+  {
+      SWSS_LOG_NOTICE("No entries in HOSTAPD_USER_CONFIG DB Table, Skip further processing", (int) db_entries.size());
+      return ret_flag;
+  }
+
+  for (auto db_entry : db_entries)
+  {
+      string key = kfvKey(db_entry);
+      string val = kfvOp(db_entry);
+
+      SWSS_LOG_DEBUG("Received %s as key and %s as OP", key.c_str(), val.c_str());
+
+      if (op == SET_COMMAND)
+      {
+          ret_flag = doHostapdUserCfgTableSetTask(db_entry)
+      }
+      else if (op == DEL_COMMAND)
+      {
+          ret_flag = doHostapdUserCfgTableDeleteTask(db_entry)
+      }
+      if (false == ret_flag)
+      {
+          SWSS_LOG_ERROR("Failed at %s HostapdUserConfig key handling", key.c_str());
+          return ret_flag;
+      }
+   }
+   return true;
+}
+
+void HostapdMgr::updateUserConfigFile(const string& username_key)
+{ /*CG_PAC*/
+    SWSS_LOG_ENTER();
+    //TODO: To Be Merged
+}
+
+void HostapdMgr::deleteUserConfigFile(const string& username_key)
+{ /*CG_PAC*/
+    SWSS_LOG_ENTER();
+    //TODO: To Be Merged
+}
+
+void HostapdMgr::createUserConfigFile(const string& username_key)
+{ /*CG_PAC*/
+    SWSS_LOG_ENTER();
+    string content = "";
+    struct stat buffer;
+
+    // Use the stat function to check if the file exists
+    if(stat(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, &buffer) != 0)
+    {//File doesn't exist, create file
+        fstream file;
+        file.open(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH,ios::out);
+        if(!file)
+        {
+            SWSS_LOG_ERROR("Failed to create Hostapd User Config file");
+            return ;
+        }
+        SWSS_LOG_ERROR("Successfully created Hostapd User Config file");
+        file.close();
+    }
+
+    hostapdUserConfigTableMap ::iterator iter = m_hostapdUserConfigMap.find(username_key);
+    if(iter != m_hostapdUserConfigMap.end())
+    {
+        // Create the content for the user configuration file
+        content = username_key + " " + iter->second.auth_type + " " + iter->second.password;
+        SWSS_LOG_DEBUG("Framed HostapdUserConfig Content: %s ", content.c_str());
+
+        // Write to the file
+        writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, content);
+    }
+    //TODO: Inform Hostapd Service needed ?
+}
+
+/* Key is MAC Address of client
+ * Value is hostapdUserConfigCacheParams_t
+ * */
+bool HostapdMgr::doHostapdUserCfgTableSetTask(const KeyOpFieldsValuesTuple & t)
+{ /*CG_PAC*/
+    const std::string & key = kfvKey(t);
+    hostapdUserConfigCacheParams_t hostapdUserConfigCache;
+
+    SWSS_LOG_ENTER();
+    /*Initialize with default values*/
+    hostapdUserConfigCache.auth_type = HOSTAPDMGR_HOSTAPD_USER_AUTH_TYPE_DEF;
+    hostapdUserConfigCache.password = HOSTAPDMGR_HOSTAPD_USER_PASSWORD_DEF;
+    hostapdUserConfigCache.vlan_id = HOSTAPDMGR_HOSTAPD_USER_VLAN_ID_DEF;
+    hostapdUserConfigCache.session_timeout = HOSTAPDMGR_HOSTAPD_USER_SESSION_TIMEOUT_DEF;
+
+    for (auto item = kfvFieldsValues(t).begin(); item != kfvFieldsValues(t).end(); item++)
+    {
+        const std::string & field = fvField(*item);
+        std::string value = fvValue(item);
+
+        if (field == "vlan_id")
+        {
+            hostapdUserConfigCache.vlan_id = stoi(value);
+            SWSS_LOG_DEBUG("MAB UserConfig Set Task: vlan_id is key and %d is vlaue", hostapdUserConfigCache.vlan_id);
+        }
+        if (field == "session_timeout")
+        {
+            hostapdUserConfigCache.session_timeout = stoi(value);
+            SWSS_LOG_DEBUG("MAB UserConfig Set Task: session_timeout is key and %d is vlaue", hostapdUserConfigCache.session_timeout);
+        }
+        if (field == "password")
+        {
+            hostapdUserConfigCache.password = value ;
+            SWSS_LOG_DEBUG("MAB UserConfig Set Task: Password is key and %s is vlaue", hostapdUserConfigCache.password.c_str());
+        }
+        if (field == "auth_type")
+        {
+            hostapdUserConfigCache.auth_type = value ;
+            SWSS_LOG_DEBUG("MAB UserConfig Set Task: AuthType is key and %s is vlaue", hostapdUserConfigCache.auth_type.c_str());
+        }
+    }
+
+    hostapdUserConfigTableMap ::iterator iter = m_hostapdUserConfigMap.find(key);
+    if(iter == m_hostapdUserConfigMap.end())
+    {
+        m_hostapdUserConfigMap.insert(pair<std::string, hostapdUserConfigCacheParams_t>(key, hostapdUserConfigCache));
+        createUserConfigFile(key);
+    }
+    else
+    {
+        iter->second.vlan_id = hostapdUserConfigCache.vlan_id;
+        iter->second.session_timeout = hostapdUserConfigCache.session_timeout;
+        iter->second.auth_type = hostapdUserConfigCache.auth_type;
+        iter->second.password = hostapdUserConfigCache.password;
+        updateUserConfigFile(key);
+    }
+    return true;
+}
+
+bool HostapdMgr::doHostapdUserCfgTableDeleteTask(const KeyOpFieldsValuesTuple & t)
+{ /*CG_PAC*/
+    SWSS_LOG_ENTER();
+    const std::string & key = kfvKey(t);
+    hostapdUserConfigTableMap::iterator iter = m_hostapdUserConfigMap.find(key);
+    if(iter != m_hostapdUserConfigMap.end())
+    {
+        SWSS_LOG_DEBUG("Deleting MAP entry for key %s in HostapdMgr", key.c_str());
+        m_hostapdUserConfigMap.erase(key);
+        deleteUserConfigFromFile(key);//TODO
+    }
+    else
+    {
+        SWSS_LOG_DEBUG("No entry exist corresponding to key %s in HostapdMgr, ignore", key.c_str());
+    }
+    return true;
+}
 
 bool HostapdMgr::processHostapdConfigPortTblEvent(Selectable *tbl) 
 {
@@ -175,7 +340,16 @@ bool HostapdMgr::processHostapdConfigPortTblEvent(Selectable *tbl)
               /* update interfaces list */
               new_interfaces.push_back(key);
             }
-          }
+              else if ((m_glbl_info.enable_auth) && (m_intf_info[key].link_status) && (!m_intf_info[key].config_created) &&
+		      (m_intf_info[key].control_mode == "auto") && (m_glbl_info.auth_order_list == "local"))
+              { //CG_PAC
+                   /* create config file */
+                   createLocalConfFile(key);
+ 
+                   /* update interfaces list */
+                   new_interfaces.push_back(key);
+               }
+	  }
           else 
           {
             // pae role none
@@ -205,7 +379,16 @@ bool HostapdMgr::processHostapdConfigPortTblEvent(Selectable *tbl)
               /* update interfaces list */
               new_interfaces.push_back(key);
             }
-          }
+	    else if ((m_glbl_info.enable_auth) && (m_intf_info[key].link_status) && (!m_intf_info[key].config_created) &&
+     (m_intf_info[key].capabilities == "authenticator") && (m_glbl_info.auth_order_list == "local"))
+            {
+                 /* create config file */
+                 createLocalConfFile(key);
+		    
+                 /* update interfaces list */
+                 new_interfaces.push_back(key);
+            }
+	  }
           else 
           {
             // pae role none
@@ -275,6 +458,12 @@ bool HostapdMgr::processHostapdConfigGlobalTblEvent(Selectable *tbl)
 
         vector<string> interfaces;
 
+	/ *CG_PAC*/
+        if (a == "auth_order_list")
+        {
+            m_glbl_info.auth_order_list = b;
+        }
+
         if (a == "dot1x_system_auth_control" )
         {
           if (b == "true")
@@ -300,6 +489,15 @@ bool HostapdMgr::processHostapdConfigGlobalTblEvent(Selectable *tbl)
                   /* update interfaces list */
                   interfaces.push_back(entry.first);
                 }
+		else if ((entry.second.capabilities == "authenticator") && (entry.second.control_mode == "auto") &&
+                    (entry.second.link_status) && (!entry.second.config_created) && (m_glbl_info.auth_order_list == "local"))
+                { //CG_PAC
+                  /* create config file */
+                  createLocalConfFile(entry.first);
+
+                  /* update interfaces list */
+                  interfaces.push_back(entry.first);
+		}
               }
 
               /* Update JSON */
@@ -473,7 +671,27 @@ void HostapdMgr::updateRadiusServer() {
        informHostapd("modified", interfaces);
        return; 
    }
+   else if (m_glbl_info.enable_auth && m_glbl_info.auth_order_list == "local")
+   { //CG_PAC
+       vector<string> interfaces;
+       for (auto const& entry: m_intf_info)
+       {
+          if ((m_glbl_info.enable_auth) && (entry.second.capabilities == "authenticator") &&
+              (entry.second.control_mode == "auto") &&
+              (entry.second.link_status))
+          {
+             /* create config file */
+             createLocalConfFile(entry.first);
 
+             /* update interfaces list */
+             interfaces.push_back(entry.first);
+          }
+       }
+
+       /* update JSON file */
+       informHostapd("modified", interfaces);
+       return;
+   }
    // Check if global auth is enabled or not 
    else if (!m_glbl_info.enable_auth || m_radiusServerInUse == "")
    {
@@ -779,6 +997,18 @@ void HostapdMgr::onMsg(int nlmsg_type, struct nl_object *obj)
         /* update interfaces list */
         interfaces.push_back(key1);
         
+        /* update JSON file */
+        informHostapd("new", interfaces);
+      }
+      else if ((m_intf_info[key1].link_status) && (!m_intf_info[key1].config_created) &&
+           (m_glbl_info.auth_order_list == "local"))
+      { //CG_PAC
+        /* create config file */
+        createLocalConfFile(key1);
+
+        /* update interfaces list */
+        interfaces.push_back(key1);
+
         /* update JSON file */
         informHostapd("new", interfaces);
       }
@@ -1159,6 +1389,55 @@ void HostapdMgr::createConfFile(const string& intf)
   writeToFile(file, content);
 
   if (!active_intf_cnt) 
+  {
+    SWSS_LOG_NOTICE("setting start hostapd flag to true");
+    start_hostapd = true;
+  }
+
+  if (false == exists)
+  {
+    active_intf_cnt++;
+    SWSS_LOG_NOTICE("incrementing intf count %d", active_intf_cnt);
+  }
+
+  m_intf_info[intf].config_created = true;
+}
+
+void HostapdMgr::createLocalConfFile(const string& intf)
+{ //CG_PAC
+  SWSS_LOG_ENTER();
+
+  string file;
+  string content;
+  bool exists = false;
+
+  file = "/etc/hostapd/";
+  file += (getHostIntfName(intf) + ".conf");
+
+  content = "interface=";
+  content += (getHostIntfName(intf) + "\n");
+
+  content += "driver=wired\n";
+  content += "logger_stdout=63\n"; // 0x3f: Turn on for all hostapd modules
+  content += "logger_stdout_level=2\n";
+  content += "logger_syslog=-1\n";
+  content += "logger_syslog_level=2\n";
+  content += "ieee8021x=1\n";
+
+  content += "ctrl_interface=/var/run/hostapd\n";
+  content += "use_pae_group_addr=1\n"; //NOTE: Different from remote config
+  content += "eap_user_file=/etc/hostapd/hostapd.eap_user\n"//NOTE: Different from remote config
+
+  SWSS_LOG_NOTICE("active intf count %d ", active_intf_cnt);
+  if (file_exists(file))
+  {
+    exists = true;
+  }
+
+  // Write to the file
+  writeToFile(file, content);
+  
+  if (!active_intf_cnt)
   {
     SWSS_LOG_NOTICE("setting start hostapd flag to true");
     start_hostapd = true;
