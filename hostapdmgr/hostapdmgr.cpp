@@ -147,13 +147,93 @@ bool HostapdMgr::processHostapdUserCfgTblEvent(Selectable *tbl)
 void HostapdMgr::updateUserConfigFile(const string& username_key)
 { /*CG_PAC*/
     SWSS_LOG_ENTER();
-    //TODO: To Be Merged
+    struct stat buffer;
+
+    // Check if the file exists
+    if (stat(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, &buffer) != 0)
+    {
+        SWSS_LOG_ERROR("Hostapd User Config file does not exist.");
+        return;
+    }
+
+    hostapdUserConfigTableMap::iterator iter = m_hostapdUserConfigMap.find(username_key);
+    if (iter != m_hostapdUserConfigMap.end())
+    {
+        std::string username = iter->first;
+        std::string authType = iter->second.auth_type;
+        std::string password = iter->second.password;
+
+        std::ifstream infile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
+        std::string line;
+        std::string updatedContent;
+
+        // Read the existing content and update the user's information
+        while (std::getline(infile, line))
+        {
+            size_t posUsername = line.find(username);
+            size_t posAuthType = line.find(authType);
+
+            if (posUsername != std::string::npos && posAuthType != std::string::npos)
+            {
+                // Both username and auth_type match, so update the password
+                updatedContent += username + " " + authType + " " + password + "\n";
+            }
+            else
+            {
+                // Keep the line as is if there's no match
+                updatedContent += line + "\n";
+            }
+        }
+
+        infile close();
+
+        // Write to the file
+        writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, updatedContent);
+    }
+    else
+    {
+        SWSS_LOG_ERROR("Username key %s not found in Hostapad User Config.", username_key.c_str());
+    }
 }
 
 void HostapdMgr::deleteUserConfigFile(const string& username_key)
 { /*CG_PAC*/
     SWSS_LOG_ENTER();
-    //TODO: To Be Merged
+    struct stat buffer;
+
+    // Check if the file exists
+    if (stat(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, &buffer) != 0)
+    {
+        SWSS_LOG_ERROR("Hostapd User Config file does not exist.");
+        return;
+    }
+
+    ifstream configFileIn(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
+    if (!configFileIn.is_open())
+    {
+        SWSS_LOG_ERROR("Failed to open Hostapd User Config file for reading.");
+        return;
+    }
+
+    string line;
+    string updatedContent = "";
+
+    // Read the file line by line, and skip the line with the specified username_key
+    while (getline(configFileIn, line))
+    {
+        size_t pos = line.find(username_key);
+        if (pos == string::npos)
+        {
+            updatedContent += line + "\n";
+        }
+    }
+
+    configFileIn.close();
+
+    // Write the updated content back to the file
+    writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, updatedContent);
+
+    SWSS_LOG_DEBUG("Deleted Hostapd User Config entry for username: %s", username_key.c_str());
 }
 
 void HostapdMgr::createUserConfigFile(const string& username_key)
