@@ -144,8 +144,8 @@ bool HostapdMgr::processHostapdUserCfgTblEvent(Selectable *tbl)
    return true;
 }
 
-void HostapdMgr::updateUserConfigFile(const string& username_key)
-{ /*CG_PAC*/
+void HostapdMgr::updateUserConfigFile(const string& username_key, const string& auth_type, const string& password)
+{
     SWSS_LOG_ENTER();
     struct stat buffer;
 
@@ -159,24 +159,26 @@ void HostapdMgr::updateUserConfigFile(const string& username_key)
     hostapdUserConfigTableMap::iterator iter = m_hostapdUserConfigMap.find(username_key);
     if (iter != m_hostapdUserConfigMap.end())
     {
-        std::string username = iter->first;
-        std::string authType = iter->second.auth_type;
-        std::string password = iter->second.password;
+        string username = iter->first;
+        string authType = iter->second.auth_type;
+        string oldPassword = iter->second.password; // Renamed to avoid shadowing
 
-        std::ifstream infile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
-        std::string line;
-        std::string updatedContent;
+        ifstream infile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
+        string line;
+        string updatedContent;
+        bool found = false;
 
         // Read the existing content and update the user's information
-        while (std::getline(infile, line))
+        while (getline(infile, line))
         {
             size_t posUsername = line.find(username);
             size_t posAuthType = line.find(authType);
 
-            if (posUsername != std::string::npos && posAuthType != std::string::npos)
+            if (posUsername != string::npos && posAuthType != string::npos)
             {
                 // Both username and auth_type match, so update the password
                 updatedContent += username + " " + authType + " " + password + "\n";
+                found = true;
             }
             else
             {
@@ -185,16 +187,30 @@ void HostapdMgr::updateUserConfigFile(const string& username_key)
             }
         }
 
-        infile close();
+        infile.close();
 
-        // Write to the file
-        writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, updatedContent);
+        if (found)
+        {
+            // Print the updated content for testing
+            SWSS_LOG_NOTICE("Updated Content:\n%s", updatedContent.c_str());
+
+            // Write to the file
+            writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, updatedContent);
+        }
+        else
+        {
+            SWSS_LOG_ERROR("Username key %s not found in Hostapad User Config.", username_key.c_str());
+            string newEntry = username + " " + authType + " " + password;
+            updatedContent += newEntry + "\n";
+            writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, updatedContent);
+        }
     }
     else
     {
         SWSS_LOG_ERROR("Username key %s not found in Hostapad User Config.", username_key.c_str());
     }
 }
+
 
 void HostapdMgr::deleteUserConfigFile(const string& username_key)
 { /*CG_PAC*/
@@ -226,9 +242,19 @@ void HostapdMgr::deleteUserConfigFile(const string& username_key)
         {
             updatedContent += line + "\n";
         }
+        else
+        {
+            entryFound = true;
+        }
     }
 
     configFileIn.close();
+
+    if (!entryFound)
+    {
+        SWSS_LOG_ERROR("username: %s", username_key.c_str() "not found in Hostapd User Config file. Deletion failed.");
+        return;
+    }
 
     // Write the updated content back to the file
     writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, updatedContent);
@@ -236,39 +262,27 @@ void HostapdMgr::deleteUserConfigFile(const string& username_key)
     SWSS_LOG_DEBUG("Deleted Hostapd User Config entry for username: %s", username_key.c_str());
 }
 
-void HostapdMgr::createUserConfigFile(const string& username_key)
-{ /*CG_PAC*/
-    SWSS_LOG_ENTER();
-    string content = "";
-    struct stat buffer;
+void HostapdMgr::createUserConfigFile(const string& username_key, const string& auth_type, const string& password) {
+    string content = readFromFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
 
-    // Use the stat function to check if the file exists
-    if(stat(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, &buffer) != 0)
-    {//File doesn't exist, create file
-        fstream file;
-        file.open(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH,ios::out);
-        if(!file)
-        {
-            SWSS_LOG_ERROR("Failed to create Hostapd User Config file");
-            return ;
-        }
-        SWSS_LOG_ERROR("Successfully created Hostapd User Config file");
-        file.close();
-    }
+    // Create the content for the new user configuration
+    string newEntry = username_key + " " + auth_type + " " + password;
+    content += newEntry + "\n";
 
-    hostapdUserConfigTableMap ::iterator iter = m_hostapdUserConfigMap.find(username_key);
-    if(iter != m_hostapdUserConfigMap.end())
-    {
-        // Create the content for the user configuration file
-        content = username_key + " " + iter->second.auth_type + " " + iter->second.password;
-        SWSS_LOG_DEBUG("Framed HostapdUserConfig Content: %s ", content.c_str());
+    // Update the map
+    m_hostapdUserConfigMap[username_key] = {auth_type, password};
 
-        // Write to the file
-        writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, content);
-    }
-    //TODO: Inform Hostapd Service needed ?
+    // Write all entries back to the file
+    writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, content);
+
+    // TODO: Inform Hostapd Service if needed
 }
 
+string HostapdMgr::readFromFile(const string& filename) {
+    ifstream file(filename);
+    string content((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+    return content;
+}
 /* Key is MAC Address of client
  * Value is hostapdUserConfigCacheParams_t
  * */
