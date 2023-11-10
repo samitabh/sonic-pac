@@ -161,7 +161,7 @@ void HostapdMgr::updateUserConfigFile(const string& username_key, const string& 
     {
         string username = iter->first;
         string authType = iter->second.auth_type;
-        string oldPassword = iter->second.password; // Renamed to avoid shadowing
+        string oldPassword = iter->second.password; 
 
         ifstream infile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
         string line;
@@ -233,7 +233,8 @@ void HostapdMgr::deleteUserConfigFile(const string& username_key)
 
     string line;
     string updatedContent = "";
-
+    bool entryFound = false;
+	
     // Read the file line by line, and skip the line with the specified username_key
     while (getline(configFileIn, line))
     {
