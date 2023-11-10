@@ -159,8 +159,8 @@ void HostapdMgr::updateUserConfigFile(const string& username_key, const string& 
     hostapdUserConfigTableMap::iterator iter = m_hostapdUserConfigMap.find(username_key);
     if (iter != m_hostapdUserConfigMap.end())
     {
-        string username = iter->first;
-        string authType = iter->second.auth_type;
+        string username_key = iter->first;
+        string auth_type = iter->second.auth_type;
         string oldPassword = iter->second.password; 
 
         ifstream infile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
@@ -171,13 +171,13 @@ void HostapdMgr::updateUserConfigFile(const string& username_key, const string& 
         // Read the existing content and update the user's information
         while (getline(infile, line))
         {
-            size_t posUsername = line.find(username);
-            size_t posAuthType = line.find(authType);
+            size_t posUsername = line.find(username_key);
+            size_t posAuthType = line.find(auth_type);
 
             if (posUsername != string::npos && posAuthType != string::npos)
             {
-                // Both username and auth_type match, so update the password
-                updatedContent += username + " " + authType + " " + password + "\n";
+                // Both username_key and auth_type match, so update the password
+                updatedContent += username_key + " " + auth_type + " " + password + "\n";
                 found = true;
             }
             else
@@ -200,7 +200,7 @@ void HostapdMgr::updateUserConfigFile(const string& username_key, const string& 
         else
         {
             SWSS_LOG_ERROR("Username key %s not found in Hostapad User Config.", username_key.c_str());
-            string newEntry = username + " " + authType + " " + password;
+            string newEntry = username_key + " " + auth_type + " " + password;
             updatedContent += newEntry + "\n";
             writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, updatedContent);
         }
@@ -210,7 +210,6 @@ void HostapdMgr::updateUserConfigFile(const string& username_key, const string& 
         SWSS_LOG_ERROR("Username key %s not found in Hostapad User Config.", username_key.c_str());
     }
 }
-
 
 void HostapdMgr::deleteUserConfigFile(const string& username_key)
 { /*CG_PAC*/
