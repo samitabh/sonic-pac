@@ -144,8 +144,8 @@ bool HostapdMgr::processHostapdUserCfgTblEvent(Selectable *tbl)
    return true;
 }
 
-void HostapdMgr::updateUserConfigFile(const string& username_key, const string& auth_type, const string& password)
-{
+void HostapdMgr::updateUserConfigFile(const string& username_key)
+{/*CG_PAC*/
     SWSS_LOG_ENTER();
     struct stat buffer;
 
@@ -161,7 +161,7 @@ void HostapdMgr::updateUserConfigFile(const string& username_key, const string& 
     {
         string username_key = iter->first;
         string auth_type = iter->second.auth_type;
-        string oldPassword = iter->second.password; 
+        string password = iter->second.password; 
 
         ifstream infile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
         string line;
@@ -262,26 +262,37 @@ void HostapdMgr::deleteUserConfigFile(const string& username_key)
     SWSS_LOG_DEBUG("Deleted Hostapd User Config entry for username: %s", username_key.c_str());
 }
 
-void HostapdMgr::createUserConfigFile(const string& username_key, const string& auth_type, const string& password) {
-    string content = readFromFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH);
+void HostapdMgr::createUserConfigFile(const string& username_key)
+{/*CG_PAC*/
+    SWSS_LOG_ENTER();
+    string content = "";
+    struct stat buffer;
 
-    // Create the content for the new user configuration
-    string newEntry = username_key + " " + auth_type + " " + password;
-    content += newEntry + "\n";
+    // Use the stat function to check if the file exists
+    if(stat(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, &buffer) != 0)
+    {//File doesn't exist, create file
+        fstream file;
+        file.open(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH,ios::out);
+        if(!file)
+        {
+            SWSS_LOG_ERROR("Failed to create Hostapd User Config file");
+            return ;
+        }
+        SWSS_LOG_ERROR("Successfully created Hostapd User Config file");
+        file.close();
+    }
 
-    // Update the map
-    m_hostapdUserConfigMap[username_key] = {auth_type, password};
+    hostapdUserConfigTableMap ::iterator iter = m_hostapdUserConfigMap.find(username_key);
+    if(iter != m_hostapdUserConfigMap.end())
+    {
+        // Create the content for the user configuration file
+        content = username_key + " " + iter->second.auth_type + " " + iter->second.password;
+        SWSS_LOG_DEBUG("Framed HostapdUserConfig Content: %s ", content.c_str());
 
-    // Write all entries back to the file
-    writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, content);
-
-    // TODO: Inform Hostapd Service if needed
-}
-
-string HostapdMgr::readFromFile(const string& filename) {
-    ifstream file(filename);
-    string content((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
-    return content;
+        // Write to the file
+        writeToFile(HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH, content);
+    }
+    //TODO: Inform Hostapd Service needed ?
 }
 /* Key is MAC Address of client
  * Value is hostapdUserConfigCacheParams_t
