@@ -36,10 +36,17 @@
 using namespace swss;
 using namespace std;
 
+#define HOSTAPDMGR_HOSTAPD_USER_CONFIG_FILE_PATH      "/etc/hostapd/hostapd.eap_user" /*CG_PAC*/
+#define HOSTAPDMGR_HOSTAPD_USER_AUTH_TYPE_DEF         "MD5" /*CG_PAC*/
+#define HOSTAPDMGR_HOSTAPD_USER_PASSWORD_DEF          "" /*CG_PAC*/
+#define HOSTAPDMGR_HOSTAPD_USER_VLAN_ID_DEF           0 /*CG_PAC*/
+#define HOSTAPDMGR_HOSTAPD_USER_SESSION_TIMEOUT_DEF   60 /*CG_PAC*/
+
 void hostapdHandleDumpError(void *cbData);
 
 typedef struct hostapd_glbl_info_s {
   unsigned int enable_auth;
+  std::string auth_order_list; /*CG_PAC*/
 }hostapd_glbl_info_t;
   
 typedef struct hostapd_intf_info_s {
@@ -67,6 +74,21 @@ typedef struct radius_info_s {
 
 typedef std::map<std::string, hostapd_intf_info_t> hostapd_intf_info_map_t;
 
+/*CG_PAC*/
+/* Hostapd User config table param cache Info */
+typedef struct hostapdUserConfigCacheParams_t {
+    std::string password;    /*Password of the user/supplicant*/
+    std::string auth_type;   /*Supported Authentication Type. Default: eap-md5*/
+    int vlan_id;             /*VLAN to be associated with the authorized client*/
+    int session_timeout;     /*Client session time*/
+} hostapdUserConfigCacheParams_t;
+
+/*MAP to store Hostapd user configuration table parameters
+ * Key: MAC Address of Supplicant
+ * Value: hostapdUserConfigCacheParams_t
+ * */
+typedef std::map<std::string, hostapdUserConfigCacheParams_t> hostapdUserConfigTableMap;
+
 class HostapdMgr : public NetMsg
 { 
 public:
@@ -84,7 +106,9 @@ private:
   SubscriberStateTable m_confHostapdGlobalTbl;
   SubscriberStateTable m_confRadiusServerTable;
   SubscriberStateTable m_confRadiusGlobalTable;
+  SubscriberStateTable m_confHostapdUserCfgTbl; /*CG_PAC*/
 
+  hostapdUserConfigTableMap     m_hostapdUserConfigMap; //CG_PAC
   hostapd_glbl_info_t m_glbl_info;
   hostapd_intf_info_map_t m_intf_info;
   radius_info_t m_radius_info;
@@ -103,10 +127,12 @@ private:
   bool processHostapdConfigGlobalTblEvent(Selectable *tbl);
   bool processRadiusServerTblEvent(Selectable *tbl);
   bool processRadiusGlobalTblEvent(Selectable *tbl);
+  bool processHostapdUserCfgTblEvent(Selectable *tbl);
 
   void writeToFile(const string& filename, const string& value);
   void informHostapd(const string& type, const vector<string> & interfaces);
   void createConfFile(const string& intf);
+  void createLocalConfFile(const string& intf); //CG_PAC
   void deleteConfFile(const string& intf);
   pid_t getHostapdPid(void);
   int waitForHostapdInit(pid_t hostapd_pid);

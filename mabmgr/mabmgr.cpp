@@ -36,14 +36,15 @@ const string INTFS_PREFIX = "E";
 MabMgr::MabMgr(DBConnector *configDb, DBConnector *stateDb, DBConnector *appDb) :
                            m_confMabPortTbl(configDb, "MAB_PORT_CONFIG_TABLE"),
                            m_confRadiusServerTable(configDb, "RADIUS_SERVER"),
-                           m_confRadiusGlobalTable(configDb, "RADIUS") {
+                           m_confRadiusGlobalTable(configDb, "RADIUS"), 
+                /*CG_PAC*/ m_confMabUserCfgTbl(configDb, "MAB_USER_CONFIG") {
 
     Logger::linkToDbNative("mabmgr");
     mab = this;
 }
 
 std::vector<Selectable*> MabMgr::getSelectables() {
-    vector<Selectable *> selectables{ &m_confMabPortTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable }; 
+    vector<Selectable *> selectables{ &m_confMabPortTbl, &m_confRadiusServerTable, &m_confRadiusGlobalTable, &m_confMabUserCfgTbl /*CG_PAC*/}; 
     return selectables;
 }
 
@@ -65,12 +66,117 @@ bool MabMgr::processDbEvent(Selectable *tbl) {
     if (tbl == ((Selectable *) & m_confRadiusGlobalTable)) {
         return processRadiusGlobalTblEvent(tbl);
     }
+	
+     if (tbl == ((Selectable *) & m_confMabUserCfgTbl)) { /*CG_PAC*/
+        return processMabUserCfgTblEvent(tbl);
+    }
 
     SWSS_LOG_DEBUG("Received event UNKNOWN to MAB, ignoring ");
     return false;
 }
 
 //Process the config db table events
+
+bool MabMgr::processMabUserCfgTblEvent(Selectable *tbl)
+{ /*CG_PAC*/
+  bool ret_flag = false;
+  std::deque<KeyOpFieldsValuesTuple> db_entries;
+
+  SWSS_LOG_ENTER();
+  m_confMabUserCfgTbl.pops(db_entries);
+  SWSS_LOG_DEBUG("Received MAB_USER_CONFIG DB table event with %d entries", (int) db_entries.size());
+
+  if (db_entries.empty())
+  {
+      SWSS_LOG_NOTICE("No entries in MAB_USER_CONFIG DB Table, Skip further processing", (int) db_entries.size());
+      return ret_flag;
+  }
+
+  for (auto db_entry : db_entries)
+  {
+      std::string key = kfvKey(db_entry);
+      std::string  op = kfvOp(db_entry);
+
+      SWSS_LOG_DEBUG("Received %s as key and %s as OP", key.c_str(), op.c_str());
+
+      if (op == SET_COMMAND)
+      {
+          ret_flag = doMabUserCfgTableSetTask(db_entry)
+      }
+      else if (op == DEL_COMMAND)
+      {
+          ret_flag = doMabUserCfgTableDeleteTask(db_entry)
+      }
+      if (false == ret_flag)
+      {
+          SWSS_LOG_ERROR("Failed at %s MabUserConfig key handling", key.c_str());
+          return ret_flag;
+      }
+   }
+   return true;
+}
+
+/* Key is MAC Address of client
+ * Value is mabUserConfigCacheParams_t
+ * */
+bool MabMgr::doMabUserCfgTableSetTask(const KeyOpFieldsValuesTuple & t)
+{/*CG_PAC*/
+    const std::string & key = kfvKey(t);
+    mabUserConfigCacheParams_t mabUserConfigCache;
+
+    SWSS_LOG_ENTER();
+
+    /*Initialize with default values*/
+    mabUserConfigCache.access_type = MABMGR_MAB_USER_CFG_ACCESS_TYPE_DEF;
+    mabUserConfigCache.vlan_id = MABMGR_MAB_USER_VLAN_ID_DEF;
+    mabUserConfigCache.session_timeout = MABMGR_MAB_USER_SESSION_TIMEOUT_DEF;
+
+    for (auto item = kfvFieldsValues(t).begin(); item != kfvFieldsValues(t).end(); item++)
+    {
+        const std::string & field = fvField(*item);
+        std::string value = fvValue(item);
+
+        if (field == "vlan_id")
+        {
+            mabUserConfigCache.vlan_id = stoi(value);
+            SWSS_LOG_DEBUG("MAB UserConfig Set Task: vlan_id is key and %d is vlaue", mabPortConfigCache.vlan_id);
+        }
+        if (field == "session_timeout")
+        {
+            mabUserConfigCache.session_timeout = stoi(value);
+            SWSS_LOG_DEBUG("MAB UserConfig Set Task: session_timeout is key and %d is vlaue", mabUserConfigCache.session_timeout);
+        }
+    }
+
+    mabUserConfigTableMap ::iterator iter = m_mabUserConfigMap.find(key);
+    if(iter == m_mabUserConfigMap.end())
+    {
+        m_mabUserConfigMap.insert(pair<std::string, mabUserConfigCacheParams_t>(key, mabUserConfigCache));
+    }
+    else
+    {
+        iter->second.vlan_id = mabUserConfigCache.vlan_id;
+        iter->second.session_timeout = mabUserConfigCache.session_timeout;
+    }
+    return true;
+}
+
+bool MabMgr::doMabUserCfgTableDeleteTask(const KeyOpFieldsValuesTuple & t)
+{/*CG_PATH*/
+    SWSS_LOG_ENTER();
+    const std::string & key = kfvKey(t);
+    mabUserConfigTableMap::iterator iter = m_mabUserConfigMap.find(key);
+    if(iter != m_mabUserConfigMap.end())
+    {
+        SWSS_LOG_DEBUG("Deleting MAP entry for key %s", key.c_str());
+        m_mabUserConfigMap.erase(key);
+    }
+    else
+    {
+        SWSS_LOG_DEBUG("No entry exist corresponding to key %s, ignore", key.c_str());
+    }
+    return true;
+}
 
 bool MabMgr::processMabConfigPortTblEvent(Selectable *tbl) 
 {
@@ -201,7 +307,7 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, uint32 & in
               iter->second.mab_enable = mabPortConfigCache.mab_enable;
             }
             else
-	    {
+            {
               SWSS_LOG_ERROR("Unable to enable/disable MAB operationally.");
               return false;
             }
@@ -217,7 +323,7 @@ bool MabMgr::doMabPortTableSetTask(const KeyOpFieldsValuesTuple & t, uint32 & in
               iter->second.mab_auth_type = mabPortConfigCache.mab_auth_type;
             }
             else
-	    {
+            {
               SWSS_LOG_ERROR("Unable to set MAB authentication type operationally.");
               return false;
             }
@@ -303,7 +409,7 @@ void MabMgr::updateRadiusServerGlobalKey(string newKey, string oldKey) {
          continue;
       }
 
-      /* Check and update Radius server if using Global key */
+       /* Check and update Radius server if using Global key */
       if (0 != newKey.size())
       {
          item.second.server_update = true;
@@ -348,7 +454,7 @@ void MabMgr::updateRadiusServer() {
        if (false == item.second.server_update)
        {
            SWSS_LOG_INFO("skipped %s as update not needed.", item.first.c_str());
-           continue;  
+           continue;
        }
 
        if (getaddrinfo(item.first.c_str(), NULL, NULL, &result) || result == NULL)
@@ -367,14 +473,14 @@ void MabMgr::updateRadiusServer() {
        freeaddrinfo(result);
 
        //Check if radius server has key configured. If not,
-       // pick global key. If key does not exist, skip to next server. 
+       // pick global key. If key does not exist, skip to next server.
        if ((item.second.server_key  == "") && (m_radius_info.m_radiusGlobalKey == ""))
        {
            SWSS_LOG_WARN("skipped %s as no key is configured.", item.first.c_str());
-           continue;  
+           continue;
        }
 
-       string newKey = m_radius_info.m_radiusGlobalKey; 
+       string newKey = m_radius_info.m_radiusGlobalKey;
        if (item.second.server_key != "")
        {
            newKey = item.second.server_key;
@@ -382,7 +488,7 @@ void MabMgr::updateRadiusServer() {
 
        string radiusIp(ip);
        item.second.server_ip = radiusIp;
-       
+
        rc = mabRadiusServerUpdate(RADIUS_MAB_SERVER_ADD, "auth", item.second.server_ip.c_str(),
                               item.second.server_priority.c_str(),
                               newKey.c_str(),
@@ -392,7 +498,7 @@ void MabMgr::updateRadiusServer() {
            SWSS_LOG_ERROR("Radius server update - Unable to update radius server details for MAB.");
            return;
        }
-       SWSS_LOG_NOTICE("Updating radius details for MAB  ip = %s,  port = %s, priority = %s", 
+       SWSS_LOG_NOTICE("Updating radius details for MAB  ip = %s,  port = %s, priority = %s",
                        item.second.server_ip.c_str(),
                        item.second.server_port.c_str(),
                        item.second.server_priority.c_str());
@@ -402,7 +508,7 @@ void MabMgr::updateRadiusServer() {
    return;
 }
 
-void MabMgr::reloadRadiusServers() 
+void MabMgr::reloadRadiusServers()
 {
    SWSS_LOG_ENTER();
    RC_t rc =  FAILURE;
@@ -426,7 +532,7 @@ void MabMgr::reloadRadiusServers()
        updateRadiusServer();
    }
 
-   rc = mabRadiusServerUpdate(RADIUS_MAB_SERVERS_RELOAD, "auth", 
+   rc = mabRadiusServerUpdate(RADIUS_MAB_SERVERS_RELOAD, "auth",
                               NULL, NULL, NULL, NULL);
 
    if ( SUCCESS != rc)
@@ -437,7 +543,7 @@ void MabMgr::reloadRadiusServers()
    return;
 }
 
-bool MabMgr::processRadiusServerTblEvent(Selectable *tbl) 
+bool MabMgr::processRadiusServerTblEvent(Selectable *tbl)
 {
   SWSS_LOG_ENTER();
   SWSS_LOG_NOTICE("Received a RADIUS_SERVER event");
@@ -494,11 +600,11 @@ bool MabMgr::processRadiusServerTblEvent(Selectable *tbl)
         }
         else if (a == "auth_port")
         {
-          m_radius_info.radius_auth_server_list[key].server_port = b; 
+          m_radius_info.radius_auth_server_list[key].server_port = b;
         }
         else if (a == "priority")
         {
-          m_radius_info.radius_auth_server_list[key].server_priority = b; 
+          m_radius_info.radius_auth_server_list[key].server_priority = b;
         }
       }
       updateRadiusServer();
@@ -506,8 +612,8 @@ bool MabMgr::processRadiusServerTblEvent(Selectable *tbl)
     else if (val == DEL_COMMAND)
     {
       RC_t rc =  FAILURE;
-      SWSS_LOG_INFO("Delete Radius server for MAB %s ", 
-                       m_radius_info.radius_auth_server_list[key].server_ip.c_str()); 
+      SWSS_LOG_INFO("Delete Radius server for MAB %s ",
+                       m_radius_info.radius_auth_server_list[key].server_ip.c_str());
       // server deleted
       rc = mabRadiusServerUpdate(RADIUS_MAB_SERVER_DELETE, "auth",
                                  m_radius_info.radius_auth_server_list[key].server_ip.c_str(),
@@ -525,7 +631,7 @@ bool MabMgr::processRadiusServerTblEvent(Selectable *tbl)
   return true;
 }
 
-bool MabMgr::processRadiusGlobalTblEvent(Selectable *tbl) 
+bool MabMgr::processRadiusGlobalTblEvent(Selectable *tbl)
 {
   SWSS_LOG_ENTER();
   SWSS_LOG_NOTICE("Received a RADIUS event");
@@ -578,11 +684,44 @@ bool MabMgr::processRadiusGlobalTblEvent(Selectable *tbl)
     }
     else if (val == DEL_COMMAND)
     {
-      m_radius_info.m_radiusGlobalKey = ""; 
+      m_radius_info.m_radiusGlobalKey = "";
     }
   }
 
   updateRadiusServerGlobalKey(m_radius_info.m_radiusGlobalKey, tmp_radiusGlobalKey);
 
   return true;
+}
+
+/*CG_PAC*/
+int lauthClientChallengeProcess(string client_mac_key, lauth_attrInfo_t * attrInfo)
+{
+  int ret_auth_status = MABMGR_MAB_LAUTH_FAILED; //Authentication Failed
+
+  SWSS_LOG_ENTER();
+  SWSS_LOG_NOTICE("Received a Client challenge request from MAC %s", client_mac_key.c_str());
+  if (attrInfo == NULL)
+  {
+      SWSS_LOG_ERROR("Received NULL Arguments ");
+      return ret_auth_status;
+  }
+
+  mabUserConfigTableMap ::iterator iter = m_mabUserConfigMap.find(client_mac_key);
+  if(iter != m_mabUserConfigMap.end())
+  {
+       //TODO: Memory for attrInfo : Caller will allocate memory ?
+       if(iter->second.access_type.c_str() == MABMGR_MAB_USER_CFG_ACCESS_TYPE_DEF)
+       {
+           attrInfo->vlanId = iter->second.vlan_id ;
+           attrInfo->sessionTimeout = iter->second.session_timeout ;
+           attrInfo->userName = client_mac_key;
+           attrInfo->userNameLen = strlen(client_mac_key.c_str());
+           ret_auth_status = MABMGR_MAB_LAUTH_SUCCESS;
+       }
+       else
+           SWSS_LOG_ERROR("Incorrect Accesstype configured for MAC %s,returning auth_failure status",client_mac_key.c_str());
+  }
+  else
+      SWSS_LOG_ERROR("Client MAC %s details not configured, returning auth_failure status", client_mac_key.c_str());
+  return ret_auth_status ;
 }
